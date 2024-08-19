@@ -13,11 +13,13 @@ from pydub import AudioSegment
 
 MAX_AUDIO_LENGTH_SECS = 8 * 60 * 60  # 8 hours
 
+
 def upload_blob(bucket_name, source_file_name, destination_blob_name):
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(source_file_name)
+
 
 def transcribe_with_google(audio_file, language_code, speaker_diarization=False, speaker_count=None):
     # 設置 GCS 路徑
@@ -81,11 +83,12 @@ def transcribe_with_google(audio_file, language_code, speaker_diarization=False,
 
     return transcript
 
+
 def main():
     st.set_page_config(page_title="Meeting Minutes Generator",
                        page_icon="🔖", layout='wide')
     st.title(":violet[🔖 Meeting Minutes Generator]")
-    
+
     with st.sidebar:
         with st.expander("📍**關於 Meeting Minutes Generator**", expanded=True):
             st.markdown('''
@@ -97,10 +100,10 @@ def main():
             st.markdown('''有任何問題都歡迎找 Max 
                         \n 📧 : max.chen@hkmci.com
                         ''')
-    
+
     vertexai.init(project=project_id, location=region)
     aiplatform.init(project=project_id, location=region)
-    
+
     textgen_model = GenerativeModel("gemini-1.5-flash")
     generation_config = GenerationConfig(
         temperature=0.1,
@@ -119,26 +122,30 @@ def main():
             threshold=vertexai.generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
         ),
     ]
-    
+
     # 設定轉文字參數
-    col1,col2 = st.columns(2)
+    col1, col2 = st.columns(2)
     with col1:
         meeting_lang = st.selectbox(":blue[**選擇會議語言**]", ["中文", "英文"])
         lang = "cmn-Hans-CN" if meeting_lang == "中文" else "en-US"
     with col2:
         speaker_labels = st.checkbox(":blue[**是否需要標註說話人**]", value=False)
         if speaker_labels:
-            speaker_num = st.number_input(":blue[**輸入說話人數量**]", min_value=2, max_value=10, value=2)
-    
-    meeting_info = st.text_area(":orange[**輸入會議相關資訊**]", height=150, placeholder="請輸入會議名稱、日期、時間、地點、出席人員、主持人、議程等相關資訊")
-    upload_audio = st.file_uploader(":orange[上傳**會議錄音檔案** 🎤(支援常見音頻格式, m4a,mp3,wav...)]", type=["m4a","mp3","wav"],accept_multiple_files=False)
+            speaker_num = st.number_input(
+                ":blue[**輸入說話人數量**]", min_value=2, max_value=10, value=2)
+
+    meeting_info = st.text_area(
+        ":orange[**輸入會議相關資訊**]", height=150, placeholder="請輸入會議名稱、日期、時間、地點、出席人員、主持人、議程等相關資訊")
+    upload_audio = st.file_uploader(
+        ":orange[上傳**會議錄音檔案** 🎤(支援常見音頻格式, m4a,mp3,wav...)]", type=["mp3"], accept_multiple_files=False)
     if upload_audio is not None:
         start_trans = st.button("製作會議紀錄")
-        
+
         if start_trans:
             with st.spinner("會議紀錄轉文字中"):
                 try:
-                    transcript = transcribe_with_google(upload_audio, lang, speaker_labels, speaker_num if speaker_labels else None)
+                    transcript = transcribe_with_google(
+                        upload_audio, lang, speaker_labels, speaker_num if speaker_labels else None)
                     st.markdown(":blue[**會議逐字稿完成 :**]")
                     with st.expander("👨🏻‍💻**會議逐字稿**", expanded=False):
                         st.write(transcript)
@@ -147,11 +154,48 @@ def main():
                     st.error(f"轉錄過程中發生錯誤: {str(e)}")
                     return
 
-            st.divider()    
-            
+            st.divider()
+
             with st.spinner("會議紀錄整理中"):
                 try:
-                    prompt = f"""您的任務是查看提供的會議記錄並創建一個簡潔的摘要來捕獲基本信息，重點關注會議期間的關鍵要點和行動項目。使用清晰、專業的語言，並使用標題、副標題和項目符號等適當的格式以邏輯方式組織摘要。確保摘要易於理解，並對會議內容提供全面而簡潔的概述，特別注重明確指出每個行動項目。 ---\n 本次會議的基本資訊：\n{meeting_info}\n---\n 會議錄音轉成逐字稿：\n{transcript}"""
+                    prompt = f"""你現在是一位專業的會議記錄員，擅長製作詳盡而結構清晰的會議紀錄。你的任務是根據提供的 [會議逐字稿] 創建一份完整、詳細且組織有序的會議紀錄。請遵循以下指引：
+                                1. 輸出格式：
+                                - 使用繁體中文
+                                - 採用 Markdown 格式
+
+                                2. 會議紀錄結構：
+                                a) 會議概要：
+                                    - 簡要說明會議的主要目標
+                                    - 概述會議的關鍵成果
+                                
+                                b) 詳細討論項目：
+                                    - 列出每個討論項目
+                                    - 對於每個項目，詳細記錄每個討論的詳細內容
+                                
+                                c) 重要決策：
+                                    - 列出會議中做出的所有重要決策
+                                
+                                d) 行動項目：
+                                    - 記錄所有被指派的任務
+                                    - 包括負責人和截止日期（如有提及）
+                                
+                                e) 未解決問題：
+                                    - 列出任何尚未解決的問題或需要後續跟進的事項
+
+                                3. 內容要求：
+                                - 確保準確捕捉所有關鍵點
+                                - 保持客觀，不加入個人意見
+                                - 使用清晰、專業的語言
+                                - 適當使用標題、子標題、項目符號等，提高可讀性
+
+                                4. 額外注意事項：
+                                - 如遇到不清楚或模糊的部分，請標註 [待確認] 以便後續跟進
+                                - 對於敏感或機密信息，請標註 [機密] 
+                                - 在紀錄中保留原始發言者的身份（如有提及）
+
+                                請記住，這份會議紀錄對我的職業發展極為重要。請仔細審視並確保內容的準確性和完整性。
+
+                                準備好並確認你已經已經理解了這些指示，並以我提供 [會議逐字稿] 以開始工作。\n 本次會議的基本資訊：\n{meeting_info}\n---\n 會議逐字稿：\n[[[{transcript}]]]"""
                     response = textgen_model.generate_content(
                         contents=prompt,
                         generation_config=generation_config,
@@ -163,11 +207,12 @@ def main():
                 except Exception as e:
                     st.error(f"生成會議紀錄時發生錯誤: {str(e)}")
 
+
 if __name__ == "__main__":
     load_dotenv()
-    
+
     # 全局變量
     project_id = st.secrets["project_id"]
     region = st.secrets["region"]
-    
+
     main()
