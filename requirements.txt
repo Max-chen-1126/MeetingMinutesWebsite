@@ -1,7 +1,0 @@
-assemblyai
-streamlit
-google-cloud-aiplatform
-google-cloud-storage
-google-cloud-speech
-python-dotenv
-pydub
