@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { UserInfo } from "@/components/UserInfo"
 import { AnimatePresence, motion } from "framer-motion"
 import {
   CalendarDays,
@@ -22,8 +23,9 @@ import {
 } from "lucide-react"
 import { useCallback, useState } from 'react'
 import { DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { Components } from 'react-markdown'; // Import Components type if needed for stricter typing
 import remarkGfm from 'remark-gfm'
+
 
 export default function Home() {
   const [meetingRecord, setMeetingRecord] = useState('')
@@ -117,17 +119,31 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `API Error: ${response.statusText}`);
+        // Attempt to parse error response, default to status text
+        let errorMsg = `API Error: ${response.statusText}`;
+        try {
+            const errorData = await response.json();
+            errorMsg = errorData.error || errorMsg;
+        } catch (parseError) {
+            console.warn("Could not parse error response JSON:", parseError);
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
       const rawRecord = data.meetingRecord || '';
       const cleanedRecord = extractMarkdown(rawRecord); // 使用輔助函數清理
       setMeetingRecord(cleanedRecord); // 設定清理後的狀態
-    } catch (err: any) {
+    // FIX 1: Use unknown for catch and check type
+    } catch (err: unknown) {
       console.error("Frontend error:", err);
-      setError(err.message || "生成會議記錄時發生錯誤");
+      let errorMessage = "生成會議記錄時發生錯誤"; // Default message
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') { // Handle if a string was thrown
+         errorMessage = err;
+      }
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
       setIsGenerating(false);
@@ -149,14 +165,45 @@ export default function Home() {
     }
   }
 
+  // FIX 2: Define custom components with unused 'node' prefixed
+  const markdownComponents: Components = {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    h1: ({ node: _node, ...props }) => <h1 {...props} className="text-2xl font-bold mb-1" />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    h2: ({ node: _node, ...props }) => <h2 {...props} className="text-xl font-semibold mb-1" />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    h3: ({ node: _node, ...props }) => <h3 {...props} />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ul: ({ node: _node, ...props }) => <ul {...props} />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ol: ({ node: _node, ...props }) => <ol {...props} />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    li: ({ node: _node, ...props }) => <li {...props} />, // Example styling
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    p: ({ node: _node, ...props }) => <p {...props} className="leading-relaxed" />, // Example styling
+};
+
+
   // --- Render ---
   return (
-    <motion.main 
+    <motion.main
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
       className="container mx-auto px-4 py-12 max-w-4xl"
     >
+      {/* 添加用戶資訊區塊 */}
+      <motion.div
+        initial={{ y: -10, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        className="flex justify-end mb-2"
+      >
+        <UserInfo className="px-4 py-2 bg-card rounded-full shadow-sm" />
+      </motion.div>
+      
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -173,7 +220,7 @@ export default function Home() {
       {/* Error Message Area */}
       <AnimatePresence>
         {error && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -186,7 +233,7 @@ export default function Home() {
       </AnimatePresence>
 
       {/* Main Grid: Single column with increased gap */}
-      <motion.div 
+      <motion.div
         className="grid gap-10"
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -227,7 +274,7 @@ export default function Home() {
                     <AnimatePresence mode="wait">
                       {audioFile ? (
                         // Display selected file info
-                        <motion.div 
+                        <motion.div
                           key="file-info"
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -258,7 +305,7 @@ export default function Home() {
                         </motion.div>
                       ) : (
                         // Display dropzone prompt
-                        <motion.div 
+                        <motion.div
                           key="upload-prompt"
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -266,19 +313,19 @@ export default function Home() {
                           className="flex flex-col items-center"
                         >
                           <motion.div
-                            animate={{ 
+                            animate={{
                               y: isDragActive ? [-5, 0, -5] : 0
                             }}
-                            transition={{ 
-                              repeat: isDragActive ? Infinity : 0, 
+                            transition={{
+                              repeat: isDragActive ? Infinity : 0,
                               duration: 1.5
                             }}
                           >
                             <UploadCloud className={`h-12 w-12 mb-3 ${isDragActive ? 'text-primary' : 'text-muted-foreground'}`} />
                           </motion.div>
-                          
+
                           {isDragReject && (
-                            <motion.p 
+                            <motion.p
                               initial={{ scale: 0.8, opacity: 0 }}
                               animate={{ scale: 1, opacity: 1 }}
                               className="text-destructive text-sm mb-2 flex items-center"
@@ -287,7 +334,7 @@ export default function Home() {
                               檔案類型不支援
                             </motion.p>
                           )}
-                          
+
                           {isDragActive ? (
                             <p className="text-primary font-semibold">將檔案拖放到這裡...</p>
                           ) : (
@@ -307,7 +354,7 @@ export default function Home() {
             </div>
 
             <div className="grid gap-4">
-              <motion.div 
+              <motion.div
                 className="space-y-2"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -326,8 +373,8 @@ export default function Home() {
                   className="transition-all focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1"
                 />
               </motion.div>
-              
-              <motion.div 
+
+              <motion.div
                 className="space-y-2"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -346,8 +393,8 @@ export default function Home() {
                   className="transition-all focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1"
                 />
               </motion.div>
-              
-              <motion.div 
+
+              <motion.div
                 className="space-y-2"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -366,8 +413,8 @@ export default function Home() {
                   className="transition-all focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1"
                 />
               </motion.div>
-              
-              <motion.div 
+
+              <motion.div
                 className="space-y-2"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -461,15 +508,15 @@ export default function Home() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
-              <motion.div 
+              <motion.div
                 className="min-h-[300px] p-4 bg-muted/40 rounded-lg whitespace-pre-wrap overflow-x-auto border border-border/50 transition-all duration-300"
-                animate={{ 
+                animate={{
                   boxShadow: isGenerating ? "0 0 0 2px rgba(var(--primary), 0.2)" : "none"
                 }}
               >
                 <AnimatePresence mode="wait">
                   {isLoading ? (
-                    <motion.div 
+                    <motion.div
                       key="loading"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -486,31 +533,24 @@ export default function Home() {
                       <Skeleton className="h-4 w-full" />
                     </motion.div>
                   ) : meetingRecord ? (
-                    <motion.div 
+                    <motion.div
                       key="content"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.5 }}
+                      // Apply prose styles for better markdown rendering
                       className="prose dark:prose-invert max-w-none"
                     >
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
-                        components={{
-                          a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />,
-                          h1: ({ node, ...props }) => <h1 {...props} />,
-                          h2: ({ node, ...props }) => <h2 {...props} />,
-                          h3: ({ node, ...props }) => <h3 {...props} />,
-                          ul: ({ node, ...props }) => <ul {...props} />,
-                          ol: ({ node, ...props }) => <ol {...props} />,
-                          li: ({ node, ...props }) => <li {...props} />,
-                          p: ({ node, ...props }) => <p {...props} />,
-                        }}
+                        // Use the defined components object
+                        components={markdownComponents}
                       >
                         {meetingRecord}
                       </ReactMarkdown>
                     </motion.div>
                   ) : (
-                    <motion.div 
+                    <motion.div
                       key="empty"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -526,14 +566,14 @@ export default function Home() {
           </Card>
         </motion.div>
       </motion.div>
-      
+
       <motion.footer
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.6 }}
         className="text-center text-xs text-muted-foreground mt-10"
       >
-        © {new Date().getFullYear()} Vibe Coding by Max. 使用 Gemini AI 技術驅動。
+        © {new Date().getFullYear()} Vibe Coding by Max. 使用 Gemini 2.5 Pro 進行會議記錄生成 。
       </motion.footer>
     </motion.main>
   )
