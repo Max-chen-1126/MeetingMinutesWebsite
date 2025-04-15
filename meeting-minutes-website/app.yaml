@@ -1,8 +1,14 @@
 runtime: nodejs20
-instance_class: F2
+instance_class: F1
 
 env_variables:
-  GOOGLE_CLOUD_PROJECT_NUMBER: "143859697876"
+  PROJECT_ID: 'tw-maxchens-sandbox'
+  GCS_BUCKET_NAME: 'meeting-audio-maxtest'
+  # 例如：us-central1, asia-east1, etc.
+  LOCATION: 'us-central1'
+
+  # NODE_ENV 通常在 GAE 上預設為 production，但可以明確設置
+  NODE_ENV: 'production'
 
 handlers:
   - url: /.*
