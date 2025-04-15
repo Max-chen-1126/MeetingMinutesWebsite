@@ -30,53 +30,81 @@ import remarkGfm from 'remark-gfm'
 export default function Home() {
   const [meetingRecord, setMeetingRecord] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
+  const [gcsPath, setGcsPath] = useState<string | null>(null) // State to store GCS path after upload
   const [meetingName, setMeetingName] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [participants, setParticipants] = useState('')
   const [additionalInfo, setAdditionalInfo] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false) // Overall loading state
+  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false); // Specific GCS upload phase
+  const [isGenerating, setIsGenerating] = useState(false) // Specific generation phase
   const [error, setError] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
 
-  // --- File Handling with React Dropzone ---
-  const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
-    setError(null); // Clear previous errors
-    if (fileRejections.length > 0) {
-      // Handle rejected files (e.g., wrong type, too many files)
-      setError(`檔案類型錯誤或不符要求: ${fileRejections[0].errors[0].message}`);
-      setAudioFile(null); // Clear any previously selected file
-    } else if (acceptedFiles.length > 0) {
-      setAudioFile(acceptedFiles[0]); // Set the accepted file
+  // --- GCS File Deletion Helper ---
+  const deleteGcsFile = useCallback(async (pathToDelete: string | null) => {
+    if (!pathToDelete) return;
+    console.log(`Requesting deletion of GCS file: ${pathToDelete}`);
+    try {
+      const response = await fetch('/api/delete-file', { // Assuming you created this API route
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gcsPath: pathToDelete }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.warn(`Failed to delete GCS file ${pathToDelete}:`, errorData.error || response.statusText);
+      } else {
+        console.log(`Successfully requested deletion for GCS file: ${pathToDelete}`);
+      }
+    } catch (err) {
+      console.error(`Error calling delete API for ${pathToDelete}:`, err);
     }
   }, []);
 
+  // --- File Handling with React Dropzone ---
+  const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
+    setError(null);
+    // If a file was previously uploaded to GCS, trigger deletion before setting new file
+    if (gcsPath) {
+      deleteGcsFile(gcsPath);
+      setGcsPath(null); // Clear GCS path state
+    }
+    setAudioFile(null); // Clear current file state first
+
+    if (fileRejections.length > 0) {
+      setError(`檔案類型錯誤或不符要求: ${fileRejections[0].errors[0].message}`);
+    } else if (acceptedFiles.length > 0) {
+      setAudioFile(acceptedFiles[0]); // Set the new accepted file
+    }
+  }, [gcsPath, deleteGcsFile]); // Add dependencies
+
   const dropzoneOptions: DropzoneOptions = {
     onDrop,
-    accept: { // Specify accepted audio types
-      'audio/mpeg': ['.mp3'],
-      'audio/wav': ['.wav'],
-      'audio/ogg': ['.ogg'],
-      'audio/mp4': ['.m4a'],
-      'audio/aac': ['.aac'],
-      'audio/*': []
+    accept: {
+      'audio/mpeg': ['.mp3'], 'audio/wav': ['.wav'], 'audio/ogg': ['.ogg'],
+      'audio/mp4': ['.m4a'], 'audio/aac': ['.aac'], 'audio/*': []
     },
     multiple: false,
-    disabled: isLoading
+    disabled: isLoading // Disable dropzone during any loading phase
   };
 
   const { getRootProps, getInputProps, isDragActive, isFocused, isDragAccept, isDragReject } = useDropzone(dropzoneOptions);
 
-  const removeAudioFile = (e: React.MouseEvent<HTMLButtonElement>) => {
+  // Modified remove function to also trigger GCS deletion if needed
+  const removeAudioFile = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
-    setAudioFile(null);
-  };
-
-  function extractMarkdown(rawText: string): string {
-    if (!rawText) {
-      return '';
+    if (gcsPath) {
+      deleteGcsFile(gcsPath);
+      setGcsPath(null);
     }
-    // 找到 ```markdown 開頭的位置
+    setAudioFile(null);
+  }, [gcsPath, deleteGcsFile]); // Add dependencies
+
+  // --- Markdown Extraction ---
+  function extractMarkdown(rawText: string): string {
+    // (Your existing extractMarkdown function - no changes needed)
+    if (!rawText) return '';
     const startMarker = '```markdown\n';
     const startIndex = rawText.indexOf(startMarker);
     const endMarker = '\n```';
@@ -99,53 +127,105 @@ export default function Home() {
       setError("請先上傳音檔");
       return;
     }
-    setIsLoading(true);
-    setIsGenerating(true);
-    setError(null);
-    setMeetingRecord(''); // Clear previous record
-    setIsCopied(false); // Reset copy state
 
-    const formData = new FormData();
-    formData.append('audioFile', audioFile);
-    formData.append('meetingName', meetingName);
-    formData.append('meetingDate', meetingDate);
-    formData.append('participants', participants);
-    formData.append('additionalInfo', additionalInfo);
+    setIsLoading(true);
+    setIsUploadingToGCS(false);
+    setIsGenerating(false);
+    setError(null);
+    setMeetingRecord('');
+    setIsCopied(false);
+    // Clear previous GCS path if starting a new generation attempt
+    // (Deletion of old GCS file handled by onDrop or removeAudioFile)
+    setGcsPath(null);
+
+    let currentGcsPath: string | null = null; // Keep track of path for this attempt
 
     try {
-      const response = await fetch('/api/generate-minutes', {
+      // ----- Step 1: Get Signed URL -----
+      console.log("Requesting signed URL...");
+      const signedUrlResponse = await fetch('/api/generate-upload-url', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: audioFile.name, contentType: audioFile.type }),
       });
 
-      if (!response.ok) {
-        // Attempt to parse error response, default to status text
-        let errorMsg = `API Error: ${response.statusText}`;
-        try {
-            const errorData = await response.json();
-            errorMsg = errorData.error || errorMsg;
-        } catch (parseError) {
-            console.warn("Could not parse error response JSON:", parseError);
-        }
+      if (!signedUrlResponse.ok) {
+        const errorData = await signedUrlResponse.json();
+        throw new Error(errorData.error || `無法取得上傳網址: ${signedUrlResponse.statusText}`);
+      }
+
+      const { signedUrl, gcsPath: receivedGcsPath } = await signedUrlResponse.json();
+      currentGcsPath = receivedGcsPath; // Store path for potential cleanup
+      console.log("Received Signed URL and GCS Path:", currentGcsPath);
+
+      // ----- Step 2: Upload file DIRECTLY to GCS -----
+      console.log("Uploading to GCS...");
+      setIsUploadingToGCS(true);
+
+      const gcsUploadResponse = await fetch(signedUrl, {
+        method: 'PUT',
+        body: audioFile,
+        headers: { 'Content-Type': audioFile.type },
+      });
+
+      setIsUploadingToGCS(false);
+
+      if (!gcsUploadResponse.ok) {
+        throw new Error(`GCS 上傳失敗: ${gcsUploadResponse.status} ${gcsUploadResponse.statusText}`);
+      }
+      console.log("GCS Upload Successful!");
+      setGcsPath(currentGcsPath); // Persist GCS path in state only after successful upload
+
+      // ----- Step 3: Notify backend API for Processing -----
+      console.log("Notifying backend API to process file from GCS...");
+      setIsGenerating(true); // Indicate processing phase
+
+      const processResponse = await fetch('/api/generate-minutes', { // Your ORIGINAL endpoint
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, // IMPORTANT: Sending JSON now
+        body: JSON.stringify({
+          gcsPath: currentGcsPath, // Send the GCS path
+          meetingName: meetingName,
+          meetingDate: meetingDate,
+          participants: participants,
+          additionalInfo: additionalInfo,
+        }),
+      });
+
+      setIsGenerating(false); // Processing phase finished
+
+      if (!processResponse.ok) {
+        let errorMsg = `API 處理錯誤: ${processResponse.statusText}`;
+        try { const errorData = await processResponse.json(); errorMsg = errorData.error || errorMsg; }
+        catch (parseError) { console.warn("Could not parse processing error JSON:", parseError); }
         throw new Error(errorMsg);
       }
 
-      const data = await response.json();
+      const data = await processResponse.json();
       const rawRecord = data.meetingRecord || '';
-      const cleanedRecord = extractMarkdown(rawRecord); // 使用輔助函數清理
-      setMeetingRecord(cleanedRecord); // 設定清理後的狀態
-    // FIX 1: Use unknown for catch and check type
+      const cleanedRecord = extractMarkdown(rawRecord);
+      setMeetingRecord(cleanedRecord);
+      console.log("Meeting record generated successfully.");
+      // File successfully processed, GCS file will be deleted by backend (`generate-minutes`) now.
+      // Reset frontend gcsPath state as it's no longer relevant for deletion from frontend.
+      setGcsPath(null);
+
     } catch (err: unknown) {
-      console.error("Frontend error:", err);
-      let errorMessage = "生成會議記錄時發生錯誤"; // Default message
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') { // Handle if a string was thrown
-         errorMessage = err;
-      }
+      console.error("Frontend process error:", err);
+      let errorMessage = "處理過程中發生錯誤";
+      if (err instanceof Error) errorMessage = err.message;
+      else if (typeof err === 'string') errorMessage = err;
       setError(errorMessage);
+      setMeetingRecord('');
+      // If an error occurred AFTER GCS upload started, try to clean up the GCS file
+      if (currentGcsPath && !meetingRecord) { // Check if gcsPath was set and no record was generated
+         console.log("Error occurred, attempting GCS cleanup...");
+         deleteGcsFile(currentGcsPath);
+         setGcsPath(null); // Clear state even if deletion fails
+      }
     } finally {
       setIsLoading(false);
+      setIsUploadingToGCS(false);
       setIsGenerating(false);
     }
   }
@@ -436,28 +516,19 @@ export default function Home() {
               </motion.div>
             </div>
 
-            <motion.div
-              whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }}
-              whileTap={{ scale: isLoading || !audioFile ? 1 : 0.98 }}
-            >
+            <motion.div whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }} /* ... */ >
               <Button
                 className="w-full group relative overflow-hidden"
                 onClick={handleGenerateRecord}
-                disabled={isLoading || !audioFile}
+                disabled={isLoading || !audioFile} // Disable if loading or no file
               >
-                <div className="absolute inset-0 w-full bg-gradient-to-r from-primary to-primary/80 group-hover:opacity-90 transition-opacity" />
+                <div className="absolute inset-0 ..." />
                 <span className="relative flex items-center justify-center">
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      生成中...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 h-4 w-4 animate-pulse" />
-                      生成會議記錄
-                    </>
-                  )}
+                  {/* Updated loading text */}
+                  {isUploadingToGCS ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 上傳至 GCS... </>)
+                  : isGenerating ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 生成中... </>)
+                  : isLoading ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 準備中... </>) // Generic loading
+                  : (<> <Sparkles className="mr-2 h-4 w-4 animate-pulse" /> 生成會議記錄 </>)}
                 </span>
               </Button>
             </motion.div>
