@@ -2,10 +2,6 @@
 import { Storage } from '@google-cloud/storage';
 import { NextRequest, NextResponse } from 'next/server';
 
-// Keep type definitions
-type SuccessResponse = {
-    message: string; // No longer used if always returning 204
-};
 type ErrorResponse = {
     error: string;
 };

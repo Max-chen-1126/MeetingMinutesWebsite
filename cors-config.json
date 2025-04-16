@@ -1,7 +1,11 @@
 [
   {
-    "origin": ["http://localhost:3000", "https://meeting.hkmci.com.tw"],
-    "method": ["PUT", "GET", "HEAD"],
+    "origin": [
+      "http://localhost:3000",
+      "https://meeting.hkmci.com.tw",
+      "https://tw-maxchens-sandbox.de.r.appspot.com"
+    ],
+    "method": ["PUT", "GET", "HEAD", "OPTIONS"],
     "responseHeader": ["Content-Type", "Access-Control-Allow-Origin"],
     "maxAgeSeconds": 3600
   }
