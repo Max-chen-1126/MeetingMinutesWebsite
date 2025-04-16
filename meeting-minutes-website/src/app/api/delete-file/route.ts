@@ -1,10 +1,10 @@
 // src/app/api/delete-file/route.ts
 import { Storage } from '@google-cloud/storage';
-import { NextRequest, NextResponse } from 'next/server'; // Import from next/server
+import { NextRequest, NextResponse } from 'next/server';
 
 // Keep type definitions
 type SuccessResponse = {
-    message: string;
+    message: string; // No longer used if always returning 204
 };
 type ErrorResponse = {
     error: string;
@@ -44,7 +44,7 @@ function parseGcsPath(gcsPath: unknown): ParsedGcsPath {
 
 
 // Use named export POST for the App Router
-export async function POST(req: NextRequest): Promise<NextResponse<SuccessResponse | ErrorResponse>> {
+export async function POST(req: NextRequest): Promise<NextResponse<ErrorResponse>> { // Return type no longer includes SuccessResponse body
     // No need to check req.method
 
     try {
@@ -79,25 +79,24 @@ export async function POST(req: NextRequest): Promise<NextResponse<SuccessRespon
         try {
             await storage.bucket(bucketName).file(filePath).delete();
             console.log(`Successfully deleted GCS file: gs://${bucketName}/${filePath}`);
-            return NextResponse.json({ message: 'File deleted successfully.' }); // Status 200 default
+            // *** MODIFICATION 1: Return 204 on successful deletion ***
+            // Instead of NextResponse.json({ message: 'File deleted successfully.' });
+            return new NextResponse(null, { status: 204 }); // Return 204 No Content
 
         } catch (deleteError: unknown) {
-            let isNotFoundError = false;
-            if (deleteError && typeof deleteError === 'object' && 'code' in deleteError) {
-                 if (deleteError.code === 404) {
-                      isNotFoundError = true;
-                      console.log(`File not found during deletion attempt (404): gs://${bucketName}/${filePath}`);
-                      return NextResponse.json({ error: 'File not found.' }, { status: 404 });
-                 }
-            }
-
-            if (!isNotFoundError) {
+            // Check if the error is specifically a "Not Found" error from GCS (code 404)
+            if (deleteError && typeof deleteError === 'object' && 'code' in deleteError && deleteError.code === 404) {
+                  console.log(`File not found during deletion attempt (404), treating as success (idempotent): gs://${bucketName}/${filePath}`);
+                  // *** MODIFICATION 2: Return 204 when GCS file is not found ***
+                  // Instead of NextResponse.json({ error: 'File not found.' }, { status: 404 });
+                  return new NextResponse(null, { status: 204 }); // Return 204 No Content
+            } else {
+                 // For other unexpected errors during deletion
                  console.error(`GCS deletion failed for gs://${bucketName}/${filePath}:`, deleteError);
                  // Propagate a generic error for security, specific error logged above
+                 // Let the outer catch handle sending the 500 response
                  throw new Error('Failed to delete file from storage.');
             }
-            // Should not reach here if isNotFoundError is true due to the return above
-            return NextResponse.json({ error: 'An unexpected error occurred during deletion logic.' }, { status: 500 });
         }
 
     } catch (error: unknown) {
@@ -111,6 +110,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SuccessRespon
              console.error("Unknown error object:", error);
         }
 
+        // Return 500 for any unhandled errors (like parsing errors or non-404 GCS errors)
         return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }
