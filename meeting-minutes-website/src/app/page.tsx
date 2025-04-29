@@ -321,7 +321,7 @@ export default function Home() {
       >
         {/* Input Card */}
         <Card className="overflow-hidden transition-all duration-300 hover:shadow-md">
-          <CardHeader className="bg-muted/30">
+          <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileAudio className="h-5 w-5 text-primary" />
               會議資訊與上傳
@@ -542,7 +542,7 @@ export default function Home() {
           transition={{ delay: 0.5 }}
         >
           <Card className="overflow-hidden transition-all duration-300 hover:shadow-md">
-            <CardHeader className="bg-muted/30">
+            <CardHeader>
               <CardTitle className="flex justify-between items-center">
                 <span className="flex items-center gap-2">
                   <FileText className="h-5 w-5 text-primary" />
