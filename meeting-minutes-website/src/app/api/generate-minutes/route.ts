@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
         };
 
         // --- Step 4: Call Gemini REST API ---
-        const modelId = "gemini-2.5-pro-preview-03-25"; // Adjust if using a different model
+        const modelId = "gemini-2.5-pro"; // Adjust if using a different model
         const apiUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
 
         console.log(`Calling Gemini REST API: ${apiUrl}`);
