@@ -1,5 +1,5 @@
 // src/lib/markdown-to-docs.ts
-import { marked, Token } from 'marked';
+import { marked, Token, Tokens } from 'marked';
 
 export interface GoogleDocsRequest {
   insertText?: {
@@ -10,7 +10,6 @@ export interface GoogleDocsRequest {
     range: { startIndex: number; endIndex: number };
     paragraphStyle: {
       namedStyleType?: string;
-      // [最終修復] 補充 padding 屬性
       borderBottom?: {
         width: { magnitude: number; unit: string };
         padding: { magnitude: number; unit: string };
@@ -72,15 +71,12 @@ export class MarkdownToDocsConverter {
       const tokens = marked.lexer(markdownContent);
       
       const tableStartLocations: { [key: number]: number } = {};
-      let tokenIndex = 0;
-      // 預處理以估算索引，這是一個簡化的方法，對於複雜文檔可能需要更精確的計算
-      const estimatedRequests = this.generateRequests(tokens, true, tableStartLocations);
-      this.currentIndex = estimatedRequests.reduce((acc, req) => {
-          if (req.insertText?.text) return acc + req.insertText.text.length;
-          return acc;
-      }, 1);
-
-      // 重置並生成真正的請求
+      
+      // Dry run pass to calculate table locations.
+      // We call the function for its side effect, not its return value.
+      this.generateRequests(tokens, true, tableStartLocations);
+      
+      // Reset and perform the real request generation
       this.currentIndex = 1;
       this.requests = this.generateRequests(tokens, false, tableStartLocations);
 
@@ -91,31 +87,36 @@ export class MarkdownToDocsConverter {
     }
   }
 
-  // 將 Token 處理邏輯提取到一個可重複使用的函式中
+  // This function processes tokens to generate requests, used for both dry runs and final conversion.
   private generateRequests(tokens: Token[], isDryRun: boolean, tableStartLocations: { [key: number]: number }): GoogleDocsRequest[] {
     const originalRequests = this.requests;
     const originalIndex = this.currentIndex;
     
+    // For the final run, start with a clean request array.
     if (!isDryRun) {
         this.requests = [];
     }
     
-    let tokenIndex = 0;
-    for(const token of tokens) {
+    // Loop through tokens to process them
+    tokens.forEach((token, index) => {
+      // During the dry run, record the calculated start location for any table.
       if (isDryRun && token.type === 'table') {
-        tableStartLocations[tokenIndex] = this.currentIndex;
+        tableStartLocations[index] = this.currentIndex;
       }
-      this.processToken(token, tableStartLocations[tokenIndex]);
-      tokenIndex++;
-    }
+      // Process the token, which updates currentIndex and may add requests.
+      this.processToken(token, tableStartLocations[index]);
+    });
 
     const finalRequests = this.requests;
+    
+    // Restore original state so the two passes don't interfere.
     this.requests = originalRequests;
     this.currentIndex = originalIndex;
 
     return finalRequests;
   }
-
+  
+  // The eslint-disable is a pragmatic choice here as `token` is a union of many possible types from `marked`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private processToken(token: any, tableStartLocation?: number): void {
     switch (token.type) {
@@ -126,6 +127,7 @@ export class MarkdownToDocsConverter {
         this.addParagraph(token.text);
         break;
       case 'list':
+        // The `items` property is specific to list tokens.
         this.addList(token.items, token.ordered);
         break;
       case 'table':
@@ -175,14 +177,14 @@ export class MarkdownToDocsConverter {
     this.addTextSegment('\n');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private addList(items: any[], ordered: boolean = false): void {
-    items.forEach((item, index) => {
-        const bullet = ordered ? `${index + 1}. ` : '• ';
+  private addList(items: Tokens.ListItem[], ordered: boolean = false): void {
+    items.forEach((item) => {
+        const bullet = ordered ? `${item.task ? '[ ]' : ''}* ` : '• ';
         this.addTextSegment(bullet);
         
+        // Process the text content within the list item.
         if (item.tokens && item.tokens.length > 0) {
-            item.tokens.forEach((subToken: any) => {
+            item.tokens.forEach((subToken: Token) => {
                 if (subToken.type === 'text') {
                     this.processInlineText(subToken.text);
                 } else if (subToken.type === 'list') {
@@ -196,9 +198,9 @@ export class MarkdownToDocsConverter {
     });
   }
 
-  private addTable(header: string[], rows: string[][], tableStartLocation: number): void {
+  private addTable(header: string[], rows: (string[])[], tableStartLocation: number): void {
     const numRows = rows.length + 1;
-    const numCols = header.length;
+    const numCols = header.length > 0 ? header.length : (rows[0]?.length || 1);
 
     this.requests.push({
       insertTable: {
@@ -212,13 +214,16 @@ export class MarkdownToDocsConverter {
     const allRows = [header, ...rows];
     
     allRows.forEach(row => {
-      row.forEach((cell, cellIndex) => {
-        const cellText = this.cleanText(cell || '');
-        tableContent += cellText;
-        if (cellIndex < numCols - 1) {
-          tableContent += '\t';
-        }
-      });
+      // Ensure row is an array before calling forEach
+      if (Array.isArray(row)) {
+        row.forEach((cell, cellIndex) => {
+          const cellText = this.cleanText(cell || '');
+          tableContent += cellText;
+          if (cellIndex < numCols - 1) {
+            tableContent += '\t';
+          }
+        });
+      }
       tableContent += '\n';
     });
     
@@ -257,7 +262,6 @@ export class MarkdownToDocsConverter {
         },
         paragraphStyle: {
           borderBottom: {
-            // [最終修復] 明確提供 padding 屬性來解決 UNIT_UNSPECIFIED 錯誤
             width: { magnitude: 1, unit: 'PT' },
             padding: { magnitude: 3, unit: 'PT' },
             dashStyle: 'SOLID',
@@ -281,7 +285,6 @@ export class MarkdownToDocsConverter {
   }
 
   private processInlineText(text: string): void {
-    // 簡單地處理粗體、斜體、刪除線，避免過度匹配
     const regex = /(\*\*|__)(.*?)\1|(\*|_)(.*?)\3|(~~)(.*?)\5/g;
     let lastIndex = 0;
     let match;

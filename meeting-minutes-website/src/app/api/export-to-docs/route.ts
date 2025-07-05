@@ -80,7 +80,6 @@ export async function POST(req: NextRequest) {
     }
 
     // 初始化 Google APIs
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docs = google.docs({ version: 'v1', auth: oauth2Client});
 
     console.log('Google APIs 初始化完成');
