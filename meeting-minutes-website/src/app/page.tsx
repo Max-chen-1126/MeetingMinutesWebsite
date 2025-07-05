@@ -22,27 +22,29 @@ import {
   Users,
   X
 } from "lucide-react"
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone'
-import ReactMarkdown, { Components } from 'react-markdown'; // Import Components type if needed for stricter typing
+import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 
 export default function Home() {
   const [meetingRecord, setMeetingRecord] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
-  const [gcsPath, setGcsPath] = useState<string | null>(null) // State to store GCS path after upload
+  const [gcsPath, setGcsPath] = useState<string | null>(null)
   const [meetingName, setMeetingName] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [participants, setParticipants] = useState('')
   const [additionalInfo, setAdditionalInfo] = useState('')
-  const [isLoading, setIsLoading] = useState(false) // Overall loading state
-  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false); // Specific GCS upload phase
-  const [isGenerating, setIsGenerating] = useState(false) // Specific generation phase
+  const [isLoading, setIsLoading] = useState(false)
+  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null)
+  const [exportSuccess, setExportSuccess] = useState<{ message: string; url: string } | null>(null);
+
 
   // --- 保存會議記錄到 localStorage ---
   const saveMeetingDataToLocal = (data: {
@@ -165,13 +167,12 @@ export default function Home() {
       const tokenInfo = localStorage.getItem('googleTokenInfo');
       if (!tokenInfo) {
         console.warn('找不到 token 詳細資訊，建議重新登入');
-        return false; // 改為返回 false，要求重新登入以確保安全
+        return false;
       }
       
       const parsed = JSON.parse(tokenInfo);
       const now = Date.now();
       
-      // 檢查是否過期（提前 2 分鐘檢查，減少誤判）
       const isValid = parsed.expires_at && now < (parsed.expires_at - 2 * 60 * 1000);
       
       if (!isValid) {
@@ -183,7 +184,6 @@ export default function Home() {
       return isValid;
     } catch (error) {
       console.error('檢查 token 有效性時出錯:', error);
-      // 出錯時清除可能損壞的 token 資料
       clearExpiredToken();
       return false;
     }
@@ -192,20 +192,17 @@ export default function Home() {
   // --- 初始化 Google Token 和恢復會議記錄 ---
   useEffect(() => {
     const initializeTokens = () => {
-      // 從 localStorage 讀取 Google access token
       const storedToken = localStorage.getItem('googleAccessToken');
       const storedTokenInfo = localStorage.getItem('googleTokenInfo');
       
       if (storedToken) {
         console.log('發現已存儲的 Google token，檢查有效性');
         
-        // 檢查 token 是否過期
         try {
           if (storedTokenInfo) {
             const parsed = JSON.parse(storedTokenInfo);
             const now = Date.now();
             
-            // 檢查是否過期（提前 2 分鐘檢查，與 isTokenValid 一致）
             if (parsed.expires_at && now >= (parsed.expires_at - 2 * 60 * 1000)) {
               console.log('Google token 已過期，自動清理');
               localStorage.removeItem('googleAccessToken');
@@ -217,14 +214,12 @@ export default function Home() {
             console.log('Token 有效，設定狀態');
             setGoogleAccessToken(storedToken);
           } else {
-            // 沒有 token 資訊，但有 token，清除以確保一致性
             console.warn('發現 token 但沒有詳細資訊，清除以確保安全');
             localStorage.removeItem('googleAccessToken');
             setError('Google 授權資訊不完整，請重新登入');
           }
         } catch (error) {
           console.error('解析 token 資訊時出錯:', error);
-          // 清除可能損壞的資料
           localStorage.removeItem('googleAccessToken');
           localStorage.removeItem('googleTokenInfo');
           setError('Google 授權資訊損壞，請重新登入');
@@ -234,19 +229,15 @@ export default function Home() {
       }
     };
 
-    // 檢查是否有錯誤參數
     const urlParams = new URLSearchParams(window.location.search);
     const errorParam = urlParams.get('error');
     if (errorParam) {
       setError(decodeURIComponent(errorParam));
-      // 清除 URL 中的錯誤參數
       window.history.replaceState({}, '', window.location.pathname);
     }
 
-    // 初始化 tokens
     initializeTokens();
 
-    // 恢復保存的會議記錄
     const restored = loadMeetingDataFromLocal();
     if (restored) {
       console.log('已恢復之前保存的會議記錄');
@@ -258,7 +249,7 @@ export default function Home() {
     if (!pathToDelete) return;
     console.log(`Requesting deletion of GCS file: ${pathToDelete}`);
     try {
-      const response = await fetch('/api/delete-file', { // Assuming you created this API route
+      const response = await fetch('/api/delete-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gcsPath: pathToDelete }),
@@ -277,19 +268,18 @@ export default function Home() {
   // --- File Handling with React Dropzone ---
   const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
     setError(null);
-    // If a file was previously uploaded to GCS, trigger deletion before setting new file
     if (gcsPath) {
       deleteGcsFile(gcsPath);
-      setGcsPath(null); // Clear GCS path state
+      setGcsPath(null);
     }
-    setAudioFile(null); // Clear current file state first
+    setAudioFile(null);
 
     if (fileRejections.length > 0) {
       setError(`檔案類型錯誤或不符要求: ${fileRejections[0].errors[0].message}`);
     } else if (acceptedFiles.length > 0) {
-      setAudioFile(acceptedFiles[0]); // Set the new accepted file
+      setAudioFile(acceptedFiles[0]);
     }
-  }, [gcsPath, deleteGcsFile]); // Add dependencies
+  }, [gcsPath, deleteGcsFile]);
 
   const dropzoneOptions: DropzoneOptions = {
     onDrop,
@@ -298,12 +288,11 @@ export default function Home() {
       'audio/mp4': ['.m4a'], 'audio/aac': ['.aac'], 'audio/*': []
     },
     multiple: false,
-    disabled: isLoading // Disable dropzone during any loading phase
+    disabled: isLoading
   };
 
   const { getRootProps, getInputProps, isDragActive, isFocused, isDragAccept, isDragReject } = useDropzone(dropzoneOptions);
 
-  // Modified remove function to also trigger GCS deletion if needed
   const removeAudioFile = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (gcsPath) {
@@ -311,11 +300,10 @@ export default function Home() {
       setGcsPath(null);
     }
     setAudioFile(null);
-  }, [gcsPath, deleteGcsFile]); // Add dependencies
+  }, [gcsPath, deleteGcsFile]);
 
   // --- Markdown Extraction ---
   function extractMarkdown(rawText: string): string {
-    // (Your existing extractMarkdown function - no changes needed)
     if (!rawText) return '';
     const startMarker = '```markdown\n';
     const startIndex = rawText.indexOf(startMarker);
@@ -346,14 +334,12 @@ export default function Home() {
     setError(null);
     setMeetingRecord('');
     setIsCopied(false);
-    // Clear previous GCS path if starting a new generation attempt
-    // (Deletion of old GCS file handled by onDrop or removeAudioFile)
     setGcsPath(null);
+    setExportSuccess(null);
 
-    let currentGcsPath: string | null = null; // Keep track of path for this attempt
+    let currentGcsPath: string | null = null;
 
     try {
-      // ----- Step 1: Get Signed URL -----
       console.log("Requesting signed URL...");
       const signedUrlResponse = await fetch('/api/generate-upload-url', {
         method: 'POST',
@@ -367,10 +353,9 @@ export default function Home() {
       }
 
       const { signedUrl, gcsPath: receivedGcsPath } = await signedUrlResponse.json();
-      currentGcsPath = receivedGcsPath; // Store path for potential cleanup
+      currentGcsPath = receivedGcsPath;
       console.log("Received Signed URL and GCS Path:", currentGcsPath);
 
-      // ----- Step 2: Upload file DIRECTLY to GCS -----
       console.log("Uploading to GCS...");
       setIsUploadingToGCS(true);
 
@@ -386,17 +371,16 @@ export default function Home() {
         throw new Error(`GCS 上傳失敗: ${gcsUploadResponse.status} ${gcsUploadResponse.statusText}`);
       }
       console.log("GCS Upload Successful!");
-      setGcsPath(currentGcsPath); // Persist GCS path in state only after successful upload
+      setGcsPath(currentGcsPath);
 
-      // ----- Step 3: Notify backend API for Processing -----
       console.log("Notifying backend API to process file from GCS...");
-      setIsGenerating(true); // Indicate processing phase
+      setIsGenerating(true);
 
-      const processResponse = await fetch('/api/generate-minutes', { // Your ORIGINAL endpoint
+      const processResponse = await fetch('/api/generate-minutes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, // IMPORTANT: Sending JSON now
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gcsPath: currentGcsPath, // Send the GCS path
+          gcsPath: currentGcsPath,
           meetingName: meetingName,
           meetingDate: meetingDate,
           participants: participants,
@@ -404,7 +388,7 @@ export default function Home() {
         }),
       });
 
-      setIsGenerating(false); // Processing phase finished
+      setIsGenerating(false);
 
       if (!processResponse.ok) {
         let errorMsg = `API 處理錯誤: ${processResponse.statusText}`;
@@ -418,7 +402,6 @@ export default function Home() {
       const cleanedRecord = extractMarkdown(rawRecord);
       setMeetingRecord(cleanedRecord);
       
-      // 自動保存會議記錄到 localStorage
       saveMeetingDataToLocal({
         meetingRecord: cleanedRecord,
         meetingName,
@@ -428,8 +411,6 @@ export default function Home() {
       });
       
       console.log("Meeting record generated successfully.");
-      // File successfully processed, GCS file will be deleted by backend (`generate-minutes`) now.
-      // Reset frontend gcsPath state as it's no longer relevant for deletion from frontend.
       setGcsPath(null);
 
     } catch (err: unknown) {
@@ -439,11 +420,10 @@ export default function Home() {
       else if (typeof err === 'string') errorMessage = err;
       setError(errorMessage);
       setMeetingRecord('');
-      // If an error occurred AFTER GCS upload started, try to clean up the GCS file
-      if (currentGcsPath && !meetingRecord) { // Check if gcsPath was set and no record was generated
+      if (currentGcsPath && !meetingRecord) {
          console.log("Error occurred, attempting GCS cleanup...");
          deleteGcsFile(currentGcsPath);
-         setGcsPath(null); // Clear state even if deletion fails
+         setGcsPath(null);
       }
     } finally {
       setIsLoading(false);
@@ -458,11 +438,11 @@ export default function Home() {
       navigator.clipboard.writeText(meetingRecord)
         .then(() => {
           setIsCopied(true);
-          setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+          setTimeout(() => setIsCopied(false), 2000);
         })
         .catch(err => {
           console.error("Failed to copy:", err);
-          setError("複製失敗，請手動複製"); // Provide user feedback
+          setError("複製失敗，請手動複製");
         });
     }
   }
@@ -476,12 +456,10 @@ export default function Home() {
         return;
       }
 
-      // 使用 Google Identity Services 進行授權
-      // 優先使用環境變數，再使用當前域名
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
       const redirectUri = `${baseUrl}/auth/callback`;
       
-      console.log('OAuth 設定:', { baseUrl, redirectUri }); // 用於除錯
+      console.log('OAuth 設定:', { baseUrl, redirectUri });
       
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
@@ -491,7 +469,6 @@ export default function Home() {
         `access_type=offline&` +
         `prompt=consent`;
 
-      // 開啟授權頁面
       window.location.href = authUrl;
     } catch (error) {
       console.error('Google 授權失敗:', error);
@@ -502,6 +479,7 @@ export default function Home() {
   // --- Google 登出處理 ---
   const handleGoogleLogout = () => {
     clearExpiredToken();
+    setExportSuccess(null);
   };
 
   // --- Google Docs Export Handling ---
@@ -513,7 +491,6 @@ export default function Home() {
       return;
     }
 
-    // 檢查 token 是否有效，如果即將過期則嘗試刷新
     if (!isTokenValid()) {
       console.log('Token 無效或即將過期，嘗試刷新...');
       const refreshed = await refreshAccessToken();
@@ -529,16 +506,14 @@ export default function Home() {
 
     setIsExporting(true);
     setError(null);
+    setExportSuccess(null);
     
     try {
       const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`;
       
-      // 詳細的調試資訊
       console.log('開始匯出到 Google Docs:', { 
         title, 
         hasToken: !!googleAccessToken,
-        tokenLength: googleAccessToken?.length || 0,
-        tokenPrefix: googleAccessToken ? googleAccessToken.substring(0, 20) + '...' : 'null',
         retryCount
       });
       
@@ -559,15 +534,16 @@ export default function Home() {
       console.log('匯出 API 回應:', { status: response.status, data });
       
       if (response.ok) {
-        // 開啟 Google Docs 文件
-        console.log('匯出成功，開啟文件:', data.documentUrl);
-        window.open(data.documentUrl, '_blank');
+        console.log('匯出成功，設定成功訊息:', data.documentUrl);
+        setExportSuccess({
+          message: 'Google 文件建立成功！',
+          url: data.documentUrl
+        });
       } else {
         console.error('匯出失敗:', data.error);
         if (response.status === 401) {
           console.log('認證失敗，嘗試刷新 token 並重試...');
           
-          // 避免無限重試
           if (retryCount >= 1) {
             console.log('已重試過一次，停止重試');
             clearExpiredToken();
@@ -579,7 +555,6 @@ export default function Home() {
           
           if (refreshed) {
             console.log('Token 刷新成功，重試匯出...');
-            // 重新呼叫匯出函式
             setIsExporting(false);
             setTimeout(() => exportToGoogleDocs(retryCount + 1), 100);
             return;
@@ -615,25 +590,24 @@ export default function Home() {
     exportToGoogleDocs(0);
   }
 
-  // FIX 2: Define custom components with unused 'node' prefixed
   const markdownComponents: Components = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h1: ({ node: _node, ...props }) => <h1 {...props} className="text-2xl font-bold mb-1" />, // Example styling
+    h1: ({ node: _node, ...props }) => <h1 {...props} className="text-2xl font-bold mb-1" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h2: ({ node: _node, ...props }) => <h2 {...props} className="text-xl font-semibold mb-1" />, // Example styling
+    h2: ({ node: _node, ...props }) => <h2 {...props} className="text-xl font-semibold mb-1" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h3: ({ node: _node, ...props }) => <h3 {...props} />, // Example styling
+    h3: ({ node: _node, ...props }) => <h3 {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ul: ({ node: _node, ...props }) => <ul {...props} />, // Example styling
+    ul: ({ node: _node, ...props }) => <ul {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ol: ({ node: _node, ...props }) => <ol {...props} />, // Example styling
+    ol: ({ node: _node, ...props }) => <ol {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    li: ({ node: _node, ...props }) => <li {...props} />, // Example styling
+    li: ({ node: _node, ...props }) => <li {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    p: ({ node: _node, ...props }) => <p {...props} className="leading-relaxed" />, // Example styling
-};
+    p: ({ node: _node, ...props }) => <p {...props} className="leading-relaxed" />,
+  };
 
 
   // --- Render ---
@@ -644,7 +618,6 @@ export default function Home() {
       transition={{ duration: 0.5 }}
       className="container mx-auto px-4 py-12 max-w-4xl"
     >
-      {/* 添加用戶資訊區塊 */}
       <motion.div
         initial={{ y: -10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -653,7 +626,6 @@ export default function Home() {
       >
         <UserInfo className="px-4 py-2 bg-card rounded-full shadow-sm" />
         
-        {/* Google 登入狀態區域 */}
         <motion.div
           className="flex items-center gap-2 px-4 py-2 bg-card rounded-full shadow-sm"
           whileHover={{ scale: 1.02 }}
@@ -702,22 +674,6 @@ export default function Home() {
         <p className="text-muted-foreground mt-2">上傳會議音檔，快速獲得會議記錄草稿</p>
       </motion.div>
 
-      {/* Error Message Area */}
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-4 p-4 bg-destructive/10 text-destructive border border-destructive rounded-md flex items-center"
-          >
-            <X className="w-5 h-5 mr-2 flex-shrink-0" />
-            <span>{error}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Grid: Single column with increased gap */}
       <motion.div
         className="grid gap-10"
         initial={{ y: 20, opacity: 0 }}
@@ -733,7 +689,6 @@ export default function Home() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6 pt-6">
-            {/* --- React Dropzone Implementation --- */}
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 <UploadCloud className="h-4 w-4 text-muted-foreground" />
@@ -758,7 +713,6 @@ export default function Home() {
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
                     <AnimatePresence mode="wait">
                       {audioFile ? (
-                        // Display selected file info
                         <motion.div
                           key="file-info"
                           initial={{ opacity: 0, y: 10 }}
@@ -789,7 +743,6 @@ export default function Home() {
                           </motion.div>
                         </motion.div>
                       ) : (
-                        // Display dropzone prompt
                         <motion.div
                           key="upload-prompt"
                           initial={{ opacity: 0, y: 10 }}
@@ -921,24 +874,80 @@ export default function Home() {
               </motion.div>
             </div>
 
-            <motion.div whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }} /* ... */ >
+            <motion.div whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }} >
               <Button
                 className="w-full group relative overflow-hidden"
                 onClick={handleGenerateRecord}
-                disabled={isLoading || !audioFile} // Disable if loading or no file
+                disabled={isLoading || !audioFile}
               >
-                <div className="absolute inset-0 ..." />
+                <div className="absolute inset-0" />
                 <span className="relative flex items-center justify-center">
-                  {/* Updated loading text */}
                   {isUploadingToGCS ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 上傳至 GCS... </>)
                   : isGenerating ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 生成中... </>)
-                  : isLoading ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 準備中... </>) // Generic loading
+                  : isLoading ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 準備中... </>)
                   : (<> <Sparkles className="mr-2 h-4 w-4 animate-pulse" /> 生成會議記錄 </>)}
                 </span>
               </Button>
             </motion.div>
           </CardContent>
         </Card>
+        
+        {/* [位置調整] 訊息區塊移動到此 */}
+        <div>
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="p-4 bg-destructive/10 text-destructive border border-destructive rounded-md flex items-center justify-between"
+              >
+                <div className="flex items-center">
+                  <X className="w-5 h-5 mr-3 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setError(null)} className="h-6 w-6 text-destructive hover:bg-destructive/20">
+                  <X className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {exportSuccess && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                // 如果同時有錯誤和成功訊息，可以增加一些間距
+                className={`p-4 bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300 border border-green-300 dark:border-green-700 rounded-md flex items-center justify-between ${error ? 'mt-4' : ''}`}
+              >
+                <div className="flex items-center">
+                  <Check className="w-5 h-5 mr-3 flex-shrink-0 text-green-600" />
+                  <span>
+                    {exportSuccess.message}{' '}
+                    <a
+                      href={exportSuccess.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold underline hover:text-green-600 dark:hover:text-green-200"
+                    >
+                      點此開啟文件
+                    </a>
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setExportSuccess(null)}
+                  className="h-6 w-6 text-green-800 dark:text-green-300 hover:bg-green-200/50 dark:hover:bg-green-800/50"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
 
         {/* Output Card */}
         <motion.div
@@ -1049,12 +1058,10 @@ export default function Home() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.5 }}
-                      // Apply prose styles for better markdown rendering
                       className="prose dark:prose-invert max-w-none"
                     >
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
-                        // Use the defined components object
                         components={markdownComponents}
                       >
                         {meetingRecord}
