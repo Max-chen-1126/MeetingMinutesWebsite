@@ -14,6 +14,7 @@ import {
   FileAudio,
   FileText,
   Loader2,
+  LogIn,
   MicVocal,
   PenLine,
   Sparkles,
@@ -21,7 +22,7 @@ import {
   Users,
   X
 } from "lucide-react"
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone'
 import ReactMarkdown, { Components } from 'react-markdown'; // Import Components type if needed for stricter typing
 import remarkGfm from 'remark-gfm'
@@ -40,6 +41,217 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false) // Specific generation phase
   const [error, setError] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null)
+
+  // --- 保存會議記錄到 localStorage ---
+  const saveMeetingDataToLocal = (data: {
+    meetingRecord: string;
+    meetingName: string;
+    meetingDate: string;
+    participants: string;
+    additionalInfo: string;
+  }) => {
+    try {
+      localStorage.setItem('savedMeetingData', JSON.stringify({
+        ...data,
+        timestamp: Date.now()
+      }));
+    } catch (error) {
+      console.warn('無法保存會議記錄到 localStorage:', error);
+    }
+  };
+
+  // --- 從 localStorage 恢復會議記錄 ---
+  const loadMeetingDataFromLocal = () => {
+    try {
+      const savedData = localStorage.getItem('savedMeetingData');
+      if (savedData) {
+        const parsedData = JSON.parse(savedData);
+        // 檢查是否是最近 24 小時內的數據
+        const isRecent = Date.now() - parsedData.timestamp < 24 * 60 * 60 * 1000;
+        if (isRecent) {
+          setMeetingRecord(parsedData.meetingRecord || '');
+          setMeetingName(parsedData.meetingName || '');
+          setMeetingDate(parsedData.meetingDate || '');
+          setParticipants(parsedData.participants || '');
+          setAdditionalInfo(parsedData.additionalInfo || '');
+          return true; // 表示成功恢復數據
+        }
+      }
+    } catch (error) {
+      console.warn('無法從 localStorage 讀取會議記錄:', error);
+    }
+    return false;
+  };
+
+  // --- 清除保存的會議記錄 ---
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const clearSavedMeetingData = () => {
+    try {
+      localStorage.removeItem('savedMeetingData');
+    } catch (error) {
+      console.warn('無法清除保存的會議記錄:', error);
+    }
+  };
+
+  // --- 清理過期 Token ---
+  const clearExpiredToken = useCallback(() => {
+    console.log('清理過期或無效的 token');
+    localStorage.removeItem('googleAccessToken');
+    localStorage.removeItem('googleTokenInfo');
+    setGoogleAccessToken(null);
+  }, []);
+
+  // --- 刷新 Access Token ---
+  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
+    try {
+      const tokenInfo = localStorage.getItem('googleTokenInfo');
+      if (!tokenInfo) {
+        console.warn('沒有 token 資訊，無法刷新');
+        return false;
+      }
+
+      const parsed = JSON.parse(tokenInfo);
+      if (!parsed.refresh_token) {
+        console.warn('沒有 refresh token，無法自動刷新');
+        return false;
+      }
+
+      console.log('正在刷新 access token...');
+      
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: parsed.refresh_token })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.access_token) {
+        // 更新 token 資訊
+        const newTokenInfo = {
+          ...parsed,
+          access_token: data.access_token,
+          expires_at: data.expires_at
+        };
+        
+        localStorage.setItem('googleAccessToken', data.access_token);
+        localStorage.setItem('googleTokenInfo', JSON.stringify(newTokenInfo));
+        setGoogleAccessToken(data.access_token);
+        
+        console.log('Access token 刷新成功');
+        return true;
+      } else {
+        console.error('刷新 token 失敗:', data.error);
+        // 如果刷新失敗，清除所有 token
+        clearExpiredToken();
+        return false;
+      }
+    } catch (error) {
+      console.error('刷新 token 時出錯:', error);
+      clearExpiredToken();
+      return false;
+    }
+  }, [clearExpiredToken]);
+
+  // --- Token 有效性檢查 ---
+  const isTokenValid = useCallback((): boolean => {
+    if (!googleAccessToken) return false;
+    
+    try {
+      const tokenInfo = localStorage.getItem('googleTokenInfo');
+      if (!tokenInfo) {
+        console.warn('找不到 token 詳細資訊，建議重新登入');
+        return false; // 改為返回 false，要求重新登入以確保安全
+      }
+      
+      const parsed = JSON.parse(tokenInfo);
+      const now = Date.now();
+      
+      // 檢查是否過期（提前 2 分鐘檢查，減少誤判）
+      const isValid = parsed.expires_at && now < (parsed.expires_at - 2 * 60 * 1000);
+      
+      if (!isValid) {
+        console.log('Token 已過期或即將過期，需要重新登入');
+        console.log('當前時間:', new Date(now).toLocaleString());
+        console.log('Token 過期時間:', new Date(parsed.expires_at).toLocaleString());
+      }
+      
+      return isValid;
+    } catch (error) {
+      console.error('檢查 token 有效性時出錯:', error);
+      // 出錯時清除可能損壞的 token 資料
+      clearExpiredToken();
+      return false;
+    }
+  }, [googleAccessToken, clearExpiredToken]);
+
+  // --- 初始化 Google Token 和恢復會議記錄 ---
+  useEffect(() => {
+    const initializeTokens = () => {
+      // 從 localStorage 讀取 Google access token
+      const storedToken = localStorage.getItem('googleAccessToken');
+      const storedTokenInfo = localStorage.getItem('googleTokenInfo');
+      
+      if (storedToken) {
+        console.log('發現已存儲的 Google token，檢查有效性');
+        
+        // 檢查 token 是否過期
+        try {
+          if (storedTokenInfo) {
+            const parsed = JSON.parse(storedTokenInfo);
+            const now = Date.now();
+            
+            // 檢查是否過期（提前 2 分鐘檢查，與 isTokenValid 一致）
+            if (parsed.expires_at && now >= (parsed.expires_at - 2 * 60 * 1000)) {
+              console.log('Google token 已過期，自動清理');
+              localStorage.removeItem('googleAccessToken');
+              localStorage.removeItem('googleTokenInfo');
+              setError('Google 授權已過期，如需匯出請重新登入');
+              return;
+            }
+            
+            console.log('Token 有效，設定狀態');
+            setGoogleAccessToken(storedToken);
+          } else {
+            // 沒有 token 資訊，但有 token，清除以確保一致性
+            console.warn('發現 token 但沒有詳細資訊，清除以確保安全');
+            localStorage.removeItem('googleAccessToken');
+            setError('Google 授權資訊不完整，請重新登入');
+          }
+        } catch (error) {
+          console.error('解析 token 資訊時出錯:', error);
+          // 清除可能損壞的資料
+          localStorage.removeItem('googleAccessToken');
+          localStorage.removeItem('googleTokenInfo');
+          setError('Google 授權資訊損壞，請重新登入');
+        }
+      } else {
+        console.log('沒有找到已存儲的 Google token');
+      }
+    };
+
+    // 檢查是否有錯誤參數
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+      // 清除 URL 中的錯誤參數
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    // 初始化 tokens
+    initializeTokens();
+
+    // 恢復保存的會議記錄
+    const restored = loadMeetingDataFromLocal();
+    if (restored) {
+      console.log('已恢復之前保存的會議記錄');
+    }
+  }, []);
 
   // --- GCS File Deletion Helper ---
   const deleteGcsFile = useCallback(async (pathToDelete: string | null) => {
@@ -205,6 +417,16 @@ export default function Home() {
       const rawRecord = data.meetingRecord || '';
       const cleanedRecord = extractMarkdown(rawRecord);
       setMeetingRecord(cleanedRecord);
+      
+      // 自動保存會議記錄到 localStorage
+      saveMeetingDataToLocal({
+        meetingRecord: cleanedRecord,
+        meetingName,
+        meetingDate,
+        participants,
+        additionalInfo
+      });
+      
       console.log("Meeting record generated successfully.");
       // File successfully processed, GCS file will be deleted by backend (`generate-minutes`) now.
       // Reset frontend gcsPath state as it's no longer relevant for deletion from frontend.
@@ -245,6 +467,154 @@ export default function Home() {
     }
   }
 
+  // --- Google OAuth Handling ---
+  const handleGoogleLogin = async () => {
+    try {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        setError('Google Client ID 未設定');
+        return;
+      }
+
+      // 使用 Google Identity Services 進行授權
+      // 優先使用環境變數，再使用當前域名
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
+      const redirectUri = `${baseUrl}/auth/callback`;
+      
+      console.log('OAuth 設定:', { baseUrl, redirectUri }); // 用於除錯
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${clientId}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `scope=${encodeURIComponent('https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email')}&` +
+        `access_type=offline&` +
+        `prompt=consent`;
+
+      // 開啟授權頁面
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error('Google 授權失敗:', error);
+      setError('Google 授權失敗，請稍後再試');
+    }
+  };
+
+  // --- Google 登出處理 ---
+  const handleGoogleLogout = () => {
+    clearExpiredToken();
+  };
+
+  // --- Google Docs Export Handling ---
+  const exportToGoogleDocs = async (retryCount = 0) => {
+    if (!meetingRecord) return;
+    
+    if (!googleAccessToken) {
+      setError('請先在頁面頂部登入 Google 帳戶');
+      return;
+    }
+
+    // 檢查 token 是否有效，如果即將過期則嘗試刷新
+    if (!isTokenValid()) {
+      console.log('Token 無效或即將過期，嘗試刷新...');
+      const refreshed = await refreshAccessToken();
+      
+      if (!refreshed) {
+        clearExpiredToken();
+        setError('Google 授權已過期，請重新登入後再匯出');
+        return;
+      }
+      
+      console.log('Token 刷新成功，繼續匯出流程');
+    }
+
+    setIsExporting(true);
+    setError(null);
+    
+    try {
+      const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`;
+      
+      // 詳細的調試資訊
+      console.log('開始匯出到 Google Docs:', { 
+        title, 
+        hasToken: !!googleAccessToken,
+        tokenLength: googleAccessToken?.length || 0,
+        tokenPrefix: googleAccessToken ? googleAccessToken.substring(0, 20) + '...' : 'null',
+        retryCount
+      });
+      
+      const response = await fetch('/api/export-to-docs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${googleAccessToken}`
+        },
+        body: JSON.stringify({
+          markdownContent: meetingRecord,
+          title: title
+        })
+      });
+      
+      const data = await response.json();
+      
+      console.log('匯出 API 回應:', { status: response.status, data });
+      
+      if (response.ok) {
+        // 開啟 Google Docs 文件
+        console.log('匯出成功，開啟文件:', data.documentUrl);
+        window.open(data.documentUrl, '_blank');
+      } else {
+        console.error('匯出失敗:', data.error);
+        if (response.status === 401) {
+          console.log('認證失敗，嘗試刷新 token 並重試...');
+          
+          // 避免無限重試
+          if (retryCount >= 1) {
+            console.log('已重試過一次，停止重試');
+            clearExpiredToken();
+            setError('Google 授權已過期，請重新登入');
+            return;
+          }
+          
+          const refreshed = await refreshAccessToken();
+          
+          if (refreshed) {
+            console.log('Token 刷新成功，重試匯出...');
+            // 重新呼叫匯出函式
+            setIsExporting(false);
+            setTimeout(() => exportToGoogleDocs(retryCount + 1), 100);
+            return;
+          } else {
+            clearExpiredToken();
+            setError('Google 授權已過期，請重新登入');
+          }
+        } else if (response.status === 403) {
+          setError('權限不足，請確認已授予 Google Docs 存取權限');
+        } else {
+          const errorMessage = data.error || data.details || '匯出至 Google Docs 失敗';
+          setError(errorMessage);
+        }
+      }
+    } catch (error) {
+      console.error('匯出錯誤:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch')) {
+          setError('網路連線問題，請檢查網路連線後重試');
+        } else {
+          setError(`匯出失敗: ${error.message}`);
+        }
+      } else {
+        setError('匯出至 Google Docs 失敗，請稍後再試');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  // --- 事件處理器包裝函數 ---
+  const handleExportToGoogleDocs = () => {
+    exportToGoogleDocs(0);
+  }
+
   // FIX 2: Define custom components with unused 'node' prefixed
   const markdownComponents: Components = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -279,9 +649,44 @@ export default function Home() {
         initial={{ y: -10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="flex justify-end mb-2"
+        className="flex justify-end items-center gap-4 mb-2"
       >
         <UserInfo className="px-4 py-2 bg-card rounded-full shadow-sm" />
+        
+        {/* Google 登入狀態區域 */}
+        <motion.div
+          className="flex items-center gap-2 px-4 py-2 bg-card rounded-full shadow-sm"
+          whileHover={{ scale: 1.02 }}
+        >
+          {googleAccessToken ? (
+            <>
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <Check className="h-4 w-4" />
+                <span>Google 已登入</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleGoogleLogout}
+                disabled={isLoading}
+                className="text-xs h-6 px-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                登出
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="text-sm text-primary hover:text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              <LogIn className="h-4 w-4 mr-1" />
+              登入 Google
+            </Button>
+          )}
+        </motion.div>
       </motion.div>
       
       <motion.div
@@ -548,34 +953,69 @@ export default function Home() {
                   <FileText className="h-5 w-5 text-primary" />
                   會議記錄
                 </span>
-                <motion.div
-                  whileHover={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 1.05 }}
-                  whileTap={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 0.95 }}
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCopyRecord}
-                    disabled={!meetingRecord || isLoading || isCopied}
-                    className="transition-all"
+                <div className="flex items-center space-x-2">
+                  <motion.div
+                    whileHover={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 1.05 }}
+                    whileTap={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 0.95 }}
                   >
-                    {isCopied ? (
-                      <motion.div
-                        initial={{ scale: 0.8 }}
-                        animate={{ scale: 1 }}
-                        className="flex items-center"
-                      >
-                        <Check className="mr-2 h-4 w-4 text-green-600" />
-                        已複製
-                      </motion.div>
-                    ) : (
-                      <>
-                        <ClipboardCopy className="mr-2 h-4 w-4" />
-                        複製內容
-                      </>
-                    )}
-                  </Button>
-                </motion.div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyRecord}
+                      disabled={!meetingRecord || isLoading || isCopied}
+                      className="transition-all disabled:opacity-50"
+                    >
+                      {isCopied ? (
+                        <motion.div
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          className="flex items-center"
+                        >
+                          <Check className="mr-2 h-4 w-4 text-green-600" />
+                          已複製
+                        </motion.div>
+                      ) : (
+                        <>
+                          <ClipboardCopy className="mr-2 h-4 w-4" />
+                          複製內容
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+                  <motion.div
+                    whileHover={{ scale: !meetingRecord || isLoading || isExporting ? 1 : 1.05 }}
+                    whileTap={{ scale: !meetingRecord || isLoading || isExporting ? 1 : 0.95 }}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportToGoogleDocs}
+                      disabled={!meetingRecord || isLoading || isExporting || !googleAccessToken}
+                      className="transition-all disabled:opacity-50"
+                    >
+                      {isExporting ? (
+                        <motion.div
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          className="flex items-center"
+                        >
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          匯出中...
+                        </motion.div>
+                      ) : googleAccessToken ? (
+                        <>
+                          <FileText className="mr-2 h-4 w-4" />
+                          匯出至 Google Docs
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="mr-2 h-4 w-4 opacity-50" />
+                          需登入 Google
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
