@@ -14,6 +14,7 @@ import {
   FileAudio,
   FileText,
   Loader2,
+  LogIn,
   MicVocal,
   PenLine,
   Sparkles,
@@ -21,32 +22,234 @@ import {
   Users,
   X
 } from "lucide-react"
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone'
-import ReactMarkdown, { Components } from 'react-markdown'; // Import Components type if needed for stricter typing
+import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 
 export default function Home() {
   const [meetingRecord, setMeetingRecord] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
-  const [gcsPath, setGcsPath] = useState<string | null>(null) // State to store GCS path after upload
+  const [gcsPath, setGcsPath] = useState<string | null>(null)
   const [meetingName, setMeetingName] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [participants, setParticipants] = useState('')
   const [additionalInfo, setAdditionalInfo] = useState('')
-  const [isLoading, setIsLoading] = useState(false) // Overall loading state
-  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false); // Specific GCS upload phase
-  const [isGenerating, setIsGenerating] = useState(false) // Specific generation phase
+  const [isLoading, setIsLoading] = useState(false)
+  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null)
+  const [exportSuccess, setExportSuccess] = useState<{ message: string; url: string } | null>(null);
+
+
+  // --- 保存會議記錄到 localStorage ---
+  const saveMeetingDataToLocal = (data: {
+    meetingRecord: string;
+    meetingName: string;
+    meetingDate: string;
+    participants: string;
+    additionalInfo: string;
+  }) => {
+    try {
+      localStorage.setItem('savedMeetingData', JSON.stringify({
+        ...data,
+        timestamp: Date.now()
+      }));
+    } catch (error) {
+      console.warn('無法保存會議記錄到 localStorage:', error);
+    }
+  };
+
+  // --- 從 localStorage 恢復會議記錄 ---
+  const loadMeetingDataFromLocal = () => {
+    try {
+      const savedData = localStorage.getItem('savedMeetingData');
+      if (savedData) {
+        const parsedData = JSON.parse(savedData);
+        // 檢查是否是最近 24 小時內的數據
+        const isRecent = Date.now() - parsedData.timestamp < 24 * 60 * 60 * 1000;
+        if (isRecent) {
+          setMeetingRecord(parsedData.meetingRecord || '');
+          setMeetingName(parsedData.meetingName || '');
+          setMeetingDate(parsedData.meetingDate || '');
+          setParticipants(parsedData.participants || '');
+          setAdditionalInfo(parsedData.additionalInfo || '');
+          return true; // 表示成功恢復數據
+        }
+      }
+    } catch (error) {
+      console.warn('無法從 localStorage 讀取會議記錄:', error);
+    }
+    return false;
+  };
+
+  // --- 清除保存的會議記錄 ---
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const clearSavedMeetingData = () => {
+    try {
+      localStorage.removeItem('savedMeetingData');
+    } catch (error) {
+      console.warn('無法清除保存的會議記錄:', error);
+    }
+  };
+
+  // --- 清理過期 Token ---
+  const clearExpiredToken = useCallback(() => {
+    console.log('清理過期或無效的 token');
+    localStorage.removeItem('googleAccessToken');
+    localStorage.removeItem('googleTokenInfo');
+    setGoogleAccessToken(null);
+  }, []);
+
+  // --- 刷新 Access Token ---
+  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
+    try {
+      const tokenInfo = localStorage.getItem('googleTokenInfo');
+      if (!tokenInfo) {
+        console.warn('沒有 token 資訊，無法刷新');
+        return false;
+      }
+
+      const parsed = JSON.parse(tokenInfo);
+      if (!parsed.refresh_token) {
+        console.warn('沒有 refresh token，無法自動刷新');
+        return false;
+      }
+
+      console.log('正在刷新 access token...');
+      
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: parsed.refresh_token })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.access_token) {
+        // 更新 token 資訊
+        const newTokenInfo = {
+          ...parsed,
+          access_token: data.access_token,
+          expires_at: data.expires_at
+        };
+        
+        localStorage.setItem('googleAccessToken', data.access_token);
+        localStorage.setItem('googleTokenInfo', JSON.stringify(newTokenInfo));
+        setGoogleAccessToken(data.access_token);
+        
+        console.log('Access token 刷新成功');
+        return true;
+      } else {
+        console.error('刷新 token 失敗:', data.error);
+        // 如果刷新失敗，清除所有 token
+        clearExpiredToken();
+        return false;
+      }
+    } catch (error) {
+      console.error('刷新 token 時出錯:', error);
+      clearExpiredToken();
+      return false;
+    }
+  }, [clearExpiredToken]);
+
+  // --- Token 有效性檢查 ---
+  const isTokenValid = useCallback((): boolean => {
+    if (!googleAccessToken) return false;
+    
+    try {
+      const tokenInfo = localStorage.getItem('googleTokenInfo');
+      if (!tokenInfo) {
+        console.warn('找不到 token 詳細資訊，建議重新登入');
+        return false;
+      }
+      
+      const parsed = JSON.parse(tokenInfo);
+      const now = Date.now();
+      
+      const isValid = parsed.expires_at && now < (parsed.expires_at - 2 * 60 * 1000);
+      
+      if (!isValid) {
+        console.log('Token 已過期或即將過期，需要重新登入');
+        console.log('當前時間:', new Date(now).toLocaleString());
+        console.log('Token 過期時間:', new Date(parsed.expires_at).toLocaleString());
+      }
+      
+      return isValid;
+    } catch (error) {
+      console.error('檢查 token 有效性時出錯:', error);
+      clearExpiredToken();
+      return false;
+    }
+  }, [googleAccessToken, clearExpiredToken]);
+
+  // --- 初始化 Google Token 和恢復會議記錄 ---
+  useEffect(() => {
+    const initializeTokens = () => {
+      const storedToken = localStorage.getItem('googleAccessToken');
+      const storedTokenInfo = localStorage.getItem('googleTokenInfo');
+      
+      if (storedToken) {
+        console.log('發現已存儲的 Google token，檢查有效性');
+        
+        try {
+          if (storedTokenInfo) {
+            const parsed = JSON.parse(storedTokenInfo);
+            const now = Date.now();
+            
+            if (parsed.expires_at && now >= (parsed.expires_at - 2 * 60 * 1000)) {
+              console.log('Google token 已過期，自動清理');
+              localStorage.removeItem('googleAccessToken');
+              localStorage.removeItem('googleTokenInfo');
+              setError('Google 授權已過期，如需匯出請重新登入');
+              return;
+            }
+            
+            console.log('Token 有效，設定狀態');
+            setGoogleAccessToken(storedToken);
+          } else {
+            console.warn('發現 token 但沒有詳細資訊，清除以確保安全');
+            localStorage.removeItem('googleAccessToken');
+            setError('Google 授權資訊不完整，請重新登入');
+          }
+        } catch (error) {
+          console.error('解析 token 資訊時出錯:', error);
+          localStorage.removeItem('googleAccessToken');
+          localStorage.removeItem('googleTokenInfo');
+          setError('Google 授權資訊損壞，請重新登入');
+        }
+      } else {
+        console.log('沒有找到已存儲的 Google token');
+      }
+    };
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    initializeTokens();
+
+    const restored = loadMeetingDataFromLocal();
+    if (restored) {
+      console.log('已恢復之前保存的會議記錄');
+    }
+  }, []);
 
   // --- GCS File Deletion Helper ---
   const deleteGcsFile = useCallback(async (pathToDelete: string | null) => {
     if (!pathToDelete) return;
     console.log(`Requesting deletion of GCS file: ${pathToDelete}`);
     try {
-      const response = await fetch('/api/delete-file', { // Assuming you created this API route
+      const response = await fetch('/api/delete-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gcsPath: pathToDelete }),
@@ -65,19 +268,18 @@ export default function Home() {
   // --- File Handling with React Dropzone ---
   const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
     setError(null);
-    // If a file was previously uploaded to GCS, trigger deletion before setting new file
     if (gcsPath) {
       deleteGcsFile(gcsPath);
-      setGcsPath(null); // Clear GCS path state
+      setGcsPath(null);
     }
-    setAudioFile(null); // Clear current file state first
+    setAudioFile(null);
 
     if (fileRejections.length > 0) {
       setError(`檔案類型錯誤或不符要求: ${fileRejections[0].errors[0].message}`);
     } else if (acceptedFiles.length > 0) {
-      setAudioFile(acceptedFiles[0]); // Set the new accepted file
+      setAudioFile(acceptedFiles[0]);
     }
-  }, [gcsPath, deleteGcsFile]); // Add dependencies
+  }, [gcsPath, deleteGcsFile]);
 
   const dropzoneOptions: DropzoneOptions = {
     onDrop,
@@ -86,12 +288,11 @@ export default function Home() {
       'audio/mp4': ['.m4a'], 'audio/aac': ['.aac'], 'audio/*': []
     },
     multiple: false,
-    disabled: isLoading // Disable dropzone during any loading phase
+    disabled: isLoading
   };
 
   const { getRootProps, getInputProps, isDragActive, isFocused, isDragAccept, isDragReject } = useDropzone(dropzoneOptions);
 
-  // Modified remove function to also trigger GCS deletion if needed
   const removeAudioFile = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (gcsPath) {
@@ -99,11 +300,10 @@ export default function Home() {
       setGcsPath(null);
     }
     setAudioFile(null);
-  }, [gcsPath, deleteGcsFile]); // Add dependencies
+  }, [gcsPath, deleteGcsFile]);
 
   // --- Markdown Extraction ---
   function extractMarkdown(rawText: string): string {
-    // (Your existing extractMarkdown function - no changes needed)
     if (!rawText) return '';
     const startMarker = '```markdown\n';
     const startIndex = rawText.indexOf(startMarker);
@@ -134,14 +334,12 @@ export default function Home() {
     setError(null);
     setMeetingRecord('');
     setIsCopied(false);
-    // Clear previous GCS path if starting a new generation attempt
-    // (Deletion of old GCS file handled by onDrop or removeAudioFile)
     setGcsPath(null);
+    setExportSuccess(null);
 
-    let currentGcsPath: string | null = null; // Keep track of path for this attempt
+    let currentGcsPath: string | null = null;
 
     try {
-      // ----- Step 1: Get Signed URL -----
       console.log("Requesting signed URL...");
       const signedUrlResponse = await fetch('/api/generate-upload-url', {
         method: 'POST',
@@ -155,10 +353,9 @@ export default function Home() {
       }
 
       const { signedUrl, gcsPath: receivedGcsPath } = await signedUrlResponse.json();
-      currentGcsPath = receivedGcsPath; // Store path for potential cleanup
+      currentGcsPath = receivedGcsPath;
       console.log("Received Signed URL and GCS Path:", currentGcsPath);
 
-      // ----- Step 2: Upload file DIRECTLY to GCS -----
       console.log("Uploading to GCS...");
       setIsUploadingToGCS(true);
 
@@ -174,17 +371,16 @@ export default function Home() {
         throw new Error(`GCS 上傳失敗: ${gcsUploadResponse.status} ${gcsUploadResponse.statusText}`);
       }
       console.log("GCS Upload Successful!");
-      setGcsPath(currentGcsPath); // Persist GCS path in state only after successful upload
+      setGcsPath(currentGcsPath);
 
-      // ----- Step 3: Notify backend API for Processing -----
       console.log("Notifying backend API to process file from GCS...");
-      setIsGenerating(true); // Indicate processing phase
+      setIsGenerating(true);
 
-      const processResponse = await fetch('/api/generate-minutes', { // Your ORIGINAL endpoint
+      const processResponse = await fetch('/api/generate-minutes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, // IMPORTANT: Sending JSON now
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gcsPath: currentGcsPath, // Send the GCS path
+          gcsPath: currentGcsPath,
           meetingName: meetingName,
           meetingDate: meetingDate,
           participants: participants,
@@ -192,7 +388,7 @@ export default function Home() {
         }),
       });
 
-      setIsGenerating(false); // Processing phase finished
+      setIsGenerating(false);
 
       if (!processResponse.ok) {
         let errorMsg = `API 處理錯誤: ${processResponse.statusText}`;
@@ -205,9 +401,16 @@ export default function Home() {
       const rawRecord = data.meetingRecord || '';
       const cleanedRecord = extractMarkdown(rawRecord);
       setMeetingRecord(cleanedRecord);
+      
+      saveMeetingDataToLocal({
+        meetingRecord: cleanedRecord,
+        meetingName,
+        meetingDate,
+        participants,
+        additionalInfo
+      });
+      
       console.log("Meeting record generated successfully.");
-      // File successfully processed, GCS file will be deleted by backend (`generate-minutes`) now.
-      // Reset frontend gcsPath state as it's no longer relevant for deletion from frontend.
       setGcsPath(null);
 
     } catch (err: unknown) {
@@ -217,11 +420,10 @@ export default function Home() {
       else if (typeof err === 'string') errorMessage = err;
       setError(errorMessage);
       setMeetingRecord('');
-      // If an error occurred AFTER GCS upload started, try to clean up the GCS file
-      if (currentGcsPath && !meetingRecord) { // Check if gcsPath was set and no record was generated
+      if (currentGcsPath && !meetingRecord) {
          console.log("Error occurred, attempting GCS cleanup...");
          deleteGcsFile(currentGcsPath);
-         setGcsPath(null); // Clear state even if deletion fails
+         setGcsPath(null);
       }
     } finally {
       setIsLoading(false);
@@ -236,34 +438,176 @@ export default function Home() {
       navigator.clipboard.writeText(meetingRecord)
         .then(() => {
           setIsCopied(true);
-          setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+          setTimeout(() => setIsCopied(false), 2000);
         })
         .catch(err => {
           console.error("Failed to copy:", err);
-          setError("複製失敗，請手動複製"); // Provide user feedback
+          setError("複製失敗，請手動複製");
         });
     }
   }
 
-  // FIX 2: Define custom components with unused 'node' prefixed
+  // --- Google OAuth Handling ---
+  const handleGoogleLogin = async () => {
+    try {
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        setError('Google Client ID 未設定');
+        return;
+      }
+
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
+      const redirectUri = `${baseUrl}/auth/callback`;
+      
+      console.log('OAuth 設定:', { baseUrl, redirectUri });
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${clientId}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `scope=${encodeURIComponent('https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email')}&` +
+        `access_type=offline&` +
+        `prompt=consent`;
+
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error('Google 授權失敗:', error);
+      setError('Google 授權失敗，請稍後再試');
+    }
+  };
+
+  // --- Google 登出處理 ---
+  const handleGoogleLogout = () => {
+    clearExpiredToken();
+    setExportSuccess(null);
+  };
+
+  // --- Google Docs Export Handling ---
+  const exportToGoogleDocs = async (retryCount = 0) => {
+    if (!meetingRecord) return;
+    
+    if (!googleAccessToken) {
+      setError('請先在頁面頂部登入 Google 帳戶');
+      return;
+    }
+
+    if (!isTokenValid()) {
+      console.log('Token 無效或即將過期，嘗試刷新...');
+      const refreshed = await refreshAccessToken();
+      
+      if (!refreshed) {
+        clearExpiredToken();
+        setError('Google 授權已過期，請重新登入後再匯出');
+        return;
+      }
+      
+      console.log('Token 刷新成功，繼續匯出流程');
+    }
+
+    setIsExporting(true);
+    setError(null);
+    setExportSuccess(null);
+    
+    try {
+      const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`;
+      
+      console.log('開始匯出到 Google Docs:', { 
+        title, 
+        hasToken: !!googleAccessToken,
+        retryCount
+      });
+      
+      const response = await fetch('/api/export-to-docs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${googleAccessToken}`
+        },
+        body: JSON.stringify({
+          markdownContent: meetingRecord,
+          title: title
+        })
+      });
+      
+      const data = await response.json();
+      
+      console.log('匯出 API 回應:', { status: response.status, data });
+      
+      if (response.ok) {
+        console.log('匯出成功，設定成功訊息:', data.documentUrl);
+        setExportSuccess({
+          message: 'Google 文件建立成功！',
+          url: data.documentUrl
+        });
+      } else {
+        console.error('匯出失敗:', data.error);
+        if (response.status === 401) {
+          console.log('認證失敗，嘗試刷新 token 並重試...');
+          
+          if (retryCount >= 1) {
+            console.log('已重試過一次，停止重試');
+            clearExpiredToken();
+            setError('Google 授權已過期，請重新登入');
+            return;
+          }
+          
+          const refreshed = await refreshAccessToken();
+          
+          if (refreshed) {
+            console.log('Token 刷新成功，重試匯出...');
+            setIsExporting(false);
+            setTimeout(() => exportToGoogleDocs(retryCount + 1), 100);
+            return;
+          } else {
+            clearExpiredToken();
+            setError('Google 授權已過期，請重新登入');
+          }
+        } else if (response.status === 403) {
+          setError('權限不足，請確認已授予 Google Docs 存取權限');
+        } else {
+          const errorMessage = data.error || data.details || '匯出至 Google Docs 失敗';
+          setError(errorMessage);
+        }
+      }
+    } catch (error) {
+      console.error('匯出錯誤:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch')) {
+          setError('網路連線問題，請檢查網路連線後重試');
+        } else {
+          setError(`匯出失敗: ${error.message}`);
+        }
+      } else {
+        setError('匯出至 Google Docs 失敗，請稍後再試');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  // --- 事件處理器包裝函數 ---
+  const handleExportToGoogleDocs = () => {
+    exportToGoogleDocs(0);
+  }
+
   const markdownComponents: Components = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h1: ({ node: _node, ...props }) => <h1 {...props} className="text-2xl font-bold mb-1" />, // Example styling
+    h1: ({ node: _node, ...props }) => <h1 {...props} className="text-2xl font-bold mb-1" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h2: ({ node: _node, ...props }) => <h2 {...props} className="text-xl font-semibold mb-1" />, // Example styling
+    h2: ({ node: _node, ...props }) => <h2 {...props} className="text-xl font-semibold mb-1" />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    h3: ({ node: _node, ...props }) => <h3 {...props} />, // Example styling
+    h3: ({ node: _node, ...props }) => <h3 {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ul: ({ node: _node, ...props }) => <ul {...props} />, // Example styling
+    ul: ({ node: _node, ...props }) => <ul {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    ol: ({ node: _node, ...props }) => <ol {...props} />, // Example styling
+    ol: ({ node: _node, ...props }) => <ol {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    li: ({ node: _node, ...props }) => <li {...props} />, // Example styling
+    li: ({ node: _node, ...props }) => <li {...props} />,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    p: ({ node: _node, ...props }) => <p {...props} className="leading-relaxed" />, // Example styling
-};
+    p: ({ node: _node, ...props }) => <p {...props} className="leading-relaxed" />,
+  };
 
 
   // --- Render ---
@@ -274,14 +618,47 @@ export default function Home() {
       transition={{ duration: 0.5 }}
       className="container mx-auto px-4 py-12 max-w-4xl"
     >
-      {/* 添加用戶資訊區塊 */}
       <motion.div
         initial={{ y: -10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="flex justify-end mb-2"
+        className="flex justify-end items-center gap-4 mb-2"
       >
         <UserInfo className="px-4 py-2 bg-card rounded-full shadow-sm" />
+        
+        <motion.div
+          className="flex items-center gap-2 px-4 py-2 bg-card rounded-full shadow-sm"
+          whileHover={{ scale: 1.02 }}
+        >
+          {googleAccessToken ? (
+            <>
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <Check className="h-4 w-4" />
+                <span>Google 已登入</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleGoogleLogout}
+                disabled={isLoading}
+                className="text-xs h-6 px-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                登出
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="text-sm text-primary hover:text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              <LogIn className="h-4 w-4 mr-1" />
+              登入 Google
+            </Button>
+          )}
+        </motion.div>
       </motion.div>
       
       <motion.div
@@ -297,22 +674,6 @@ export default function Home() {
         <p className="text-muted-foreground mt-2">上傳會議音檔，快速獲得會議記錄草稿</p>
       </motion.div>
 
-      {/* Error Message Area */}
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-4 p-4 bg-destructive/10 text-destructive border border-destructive rounded-md flex items-center"
-          >
-            <X className="w-5 h-5 mr-2 flex-shrink-0" />
-            <span>{error}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Grid: Single column with increased gap */}
       <motion.div
         className="grid gap-10"
         initial={{ y: 20, opacity: 0 }}
@@ -328,7 +689,6 @@ export default function Home() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6 pt-6">
-            {/* --- React Dropzone Implementation --- */}
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 <UploadCloud className="h-4 w-4 text-muted-foreground" />
@@ -353,7 +713,6 @@ export default function Home() {
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
                     <AnimatePresence mode="wait">
                       {audioFile ? (
-                        // Display selected file info
                         <motion.div
                           key="file-info"
                           initial={{ opacity: 0, y: 10 }}
@@ -384,7 +743,6 @@ export default function Home() {
                           </motion.div>
                         </motion.div>
                       ) : (
-                        // Display dropzone prompt
                         <motion.div
                           key="upload-prompt"
                           initial={{ opacity: 0, y: 10 }}
@@ -516,24 +874,80 @@ export default function Home() {
               </motion.div>
             </div>
 
-            <motion.div whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }} /* ... */ >
+            <motion.div whileHover={{ scale: isLoading || !audioFile ? 1 : 1.02 }} >
               <Button
                 className="w-full group relative overflow-hidden"
                 onClick={handleGenerateRecord}
-                disabled={isLoading || !audioFile} // Disable if loading or no file
+                disabled={isLoading || !audioFile}
               >
-                <div className="absolute inset-0 ..." />
+                <div className="absolute inset-0" />
                 <span className="relative flex items-center justify-center">
-                  {/* Updated loading text */}
                   {isUploadingToGCS ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 上傳至 GCS... </>)
                   : isGenerating ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 生成中... </>)
-                  : isLoading ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 準備中... </>) // Generic loading
+                  : isLoading ? (<> <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 準備中... </>)
                   : (<> <Sparkles className="mr-2 h-4 w-4 animate-pulse" /> 生成會議記錄 </>)}
                 </span>
               </Button>
             </motion.div>
           </CardContent>
         </Card>
+        
+        {/* [位置調整] 訊息區塊移動到此 */}
+        <div>
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="p-4 bg-destructive/10 text-destructive border border-destructive rounded-md flex items-center justify-between"
+              >
+                <div className="flex items-center">
+                  <X className="w-5 h-5 mr-3 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setError(null)} className="h-6 w-6 text-destructive hover:bg-destructive/20">
+                  <X className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {exportSuccess && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                // 如果同時有錯誤和成功訊息，可以增加一些間距
+                className={`p-4 bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300 border border-green-300 dark:border-green-700 rounded-md flex items-center justify-between ${error ? 'mt-4' : ''}`}
+              >
+                <div className="flex items-center">
+                  <Check className="w-5 h-5 mr-3 flex-shrink-0 text-green-600" />
+                  <span>
+                    {exportSuccess.message}{' '}
+                    <a
+                      href={exportSuccess.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold underline hover:text-green-600 dark:hover:text-green-200"
+                    >
+                      點此開啟文件
+                    </a>
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setExportSuccess(null)}
+                  className="h-6 w-6 text-green-800 dark:text-green-300 hover:bg-green-200/50 dark:hover:bg-green-800/50"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
 
         {/* Output Card */}
         <motion.div
@@ -548,34 +962,69 @@ export default function Home() {
                   <FileText className="h-5 w-5 text-primary" />
                   會議記錄
                 </span>
-                <motion.div
-                  whileHover={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 1.05 }}
-                  whileTap={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 0.95 }}
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCopyRecord}
-                    disabled={!meetingRecord || isLoading || isCopied}
-                    className="transition-all"
+                <div className="flex items-center space-x-2">
+                  <motion.div
+                    whileHover={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 1.05 }}
+                    whileTap={{ scale: !meetingRecord || isLoading || isCopied ? 1 : 0.95 }}
                   >
-                    {isCopied ? (
-                      <motion.div
-                        initial={{ scale: 0.8 }}
-                        animate={{ scale: 1 }}
-                        className="flex items-center"
-                      >
-                        <Check className="mr-2 h-4 w-4 text-green-600" />
-                        已複製
-                      </motion.div>
-                    ) : (
-                      <>
-                        <ClipboardCopy className="mr-2 h-4 w-4" />
-                        複製內容
-                      </>
-                    )}
-                  </Button>
-                </motion.div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyRecord}
+                      disabled={!meetingRecord || isLoading || isCopied}
+                      className="transition-all disabled:opacity-50"
+                    >
+                      {isCopied ? (
+                        <motion.div
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          className="flex items-center"
+                        >
+                          <Check className="mr-2 h-4 w-4 text-green-600" />
+                          已複製
+                        </motion.div>
+                      ) : (
+                        <>
+                          <ClipboardCopy className="mr-2 h-4 w-4" />
+                          複製內容
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+                  <motion.div
+                    whileHover={{ scale: !meetingRecord || isLoading || isExporting ? 1 : 1.05 }}
+                    whileTap={{ scale: !meetingRecord || isLoading || isExporting ? 1 : 0.95 }}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportToGoogleDocs}
+                      disabled={!meetingRecord || isLoading || isExporting || !googleAccessToken}
+                      className="transition-all disabled:opacity-50"
+                    >
+                      {isExporting ? (
+                        <motion.div
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          className="flex items-center"
+                        >
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          匯出中...
+                        </motion.div>
+                      ) : googleAccessToken ? (
+                        <>
+                          <FileText className="mr-2 h-4 w-4" />
+                          匯出至 Google Docs
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="mr-2 h-4 w-4 opacity-50" />
+                          需登入 Google
+                        </>
+                      )}
+                    </Button>
+                  </motion.div>
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-6">
@@ -609,12 +1058,10 @@ export default function Home() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.5 }}
-                      // Apply prose styles for better markdown rendering
                       className="prose dark:prose-invert max-w-none"
                     >
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
-                        // Use the defined components object
                         components={markdownComponents}
                       >
                         {meetingRecord}
