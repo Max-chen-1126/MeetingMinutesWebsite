@@ -38,6 +38,15 @@ export async function getOAuthConfig(): Promise<OAuthConfig> {
     baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   }
   
+  // 如果是生產環境但沒有從 Secret Manager 取得 clientId，嘗試從 Secret Manager 讀取
+  if (isProduction && !clientId) {
+    try {
+      clientId = await getSecret('google-oauth-client-id');
+    } catch (error) {
+      console.error('無法從 Secret Manager 讀取 Client ID:', error);
+    }
+  }
+  
   if (!clientId || !clientSecret) {
     throw new Error('Google OAuth 設定不完整');
   }
