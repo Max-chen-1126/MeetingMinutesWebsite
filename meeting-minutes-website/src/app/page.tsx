@@ -100,7 +100,6 @@ export default function Home() {
   // --- 清理過期 Token ---
   const clearExpiredToken = useCallback(() => {
     console.log('清理過期或無效的 token');
-    localStorage.removeItem('googleAccessToken');
     localStorage.removeItem('googleTokenInfo');
     setGoogleAccessToken(null);
   }, []);
@@ -140,7 +139,6 @@ export default function Home() {
           expires_at: data.expires_at
         };
         
-        localStorage.setItem('googleAccessToken', data.access_token);
         localStorage.setItem('googleTokenInfo', JSON.stringify(newTokenInfo));
         setGoogleAccessToken(data.access_token);
         
@@ -192,35 +190,32 @@ export default function Home() {
   // --- 初始化 Google Token 和恢復會議記錄 ---
   useEffect(() => {
     const initializeTokens = () => {
-      const storedToken = localStorage.getItem('googleAccessToken');
       const storedTokenInfo = localStorage.getItem('googleTokenInfo');
       
-      if (storedToken) {
+      if (storedTokenInfo) {
         console.log('發現已存儲的 Google token，檢查有效性');
         
         try {
-          if (storedTokenInfo) {
-            const parsed = JSON.parse(storedTokenInfo);
-            const now = Date.now();
-            
-            if (parsed.expires_at && now >= (parsed.expires_at - 2 * 60 * 1000)) {
-              console.log('Google token 已過期，自動清理');
-              localStorage.removeItem('googleAccessToken');
-              localStorage.removeItem('googleTokenInfo');
-              setError('Google 授權已過期，如需匯出請重新登入');
-              return;
-            }
-            
+          const parsed = JSON.parse(storedTokenInfo);
+          const now = Date.now();
+          
+          if (parsed.expires_at && now >= (parsed.expires_at - 2 * 60 * 1000)) {
+            console.log('Google token 已過期，自動清理');
+            localStorage.removeItem('googleTokenInfo');
+            setError('Google 授權已過期，如需匯出請重新登入');
+            return;
+          }
+          
+          if (parsed.access_token) {
             console.log('Token 有效，設定狀態');
-            setGoogleAccessToken(storedToken);
+            setGoogleAccessToken(parsed.access_token);
           } else {
-            console.warn('發現 token 但沒有詳細資訊，清除以確保安全');
-            localStorage.removeItem('googleAccessToken');
+            console.warn('Token 資訊中缺少 access_token，清除以確保安全');
+            localStorage.removeItem('googleTokenInfo');
             setError('Google 授權資訊不完整，請重新登入');
           }
         } catch (error) {
           console.error('解析 token 資訊時出錯:', error);
-          localStorage.removeItem('googleAccessToken');
           localStorage.removeItem('googleTokenInfo');
           setError('Google 授權資訊損壞，請重新登入');
         }

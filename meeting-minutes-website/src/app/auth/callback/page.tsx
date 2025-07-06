@@ -48,9 +48,6 @@ export default function AuthCallback() {
           };
           localStorage.setItem('googleTokenInfo', JSON.stringify(tokenInfo));
           
-          // 為了向後相容，也保存 access_token
-          localStorage.setItem('googleAccessToken', tokenData.access_token);
-          
           // 重定向回首頁
           router.push('/');
         } else {
