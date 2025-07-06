@@ -12,7 +12,6 @@ env_variables:
   DEPLOYMENT_ENV: 'production'
   
   # 生產環境的 Base URL
-  NEXT_PUBLIC_GOOGLE_CLIENT_ID: '143859697876-kpgc7afaebthub6toe3o7gafcr436gfd.apps.googleusercontent.com'
   NEXT_PUBLIC_BASE_URL: 'https://meeting.hkmci.com.tw'
 
 handlers:

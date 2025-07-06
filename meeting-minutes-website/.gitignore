@@ -46,3 +46,4 @@ env/*
 #ClAUDE
 ClAUDE.md
 doc/*
+.claude/*
