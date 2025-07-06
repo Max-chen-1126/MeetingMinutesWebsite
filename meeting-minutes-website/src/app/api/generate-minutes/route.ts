@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     try {
         // --- Step 1: Get Request Body (JSON) ---
         const body = await req.json();
-        receivedGcsPath = typeof body.gcsPath === 'string' ? body.gcsPath : null;
+        const fileName = typeof body.fileName === 'string' ? body.fileName : null;
         const contentType = typeof body.contentType === 'string' ? body.contentType : 'audio/mpeg';
         const meetingName = body.meetingName || '未提供';
         const meetingDate = body.meetingDate || '未提供';
@@ -62,15 +62,23 @@ export async function POST(req: NextRequest) {
         const additionalInfo = body.additionalInfo || '無';
 
         // --- Input Validation ---
-        if (!receivedGcsPath) {
+        if (!fileName) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Missing required parameter: gcsPath';
+            errorMessage = 'Missing required parameter: fileName';
             throw new Error(errorMessage);
         }
+        
+        // Build GCS path from fileName
+        const bucketName = process.env.GCS_BUCKET_NAME;
+        if (!bucketName) {
+            errorMessage = 'Server configuration error: GCS_BUCKET_NAME not set';
+            throw new Error(errorMessage);
+        }
+        receivedGcsPath = `gs://${bucketName}/uploads/${fileName}`;
         const parsedPath = parseGcsPath(receivedGcsPath);
         if (!parsedPath) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Invalid GCS path format. Expected gs://bucket-name/file/path';
+            errorMessage = 'Failed to parse GCS path from fileName';
             throw new Error(errorMessage);
         }
         // NOTE: The ESLint error about unused 'filePath' might be specific to a scope
@@ -168,7 +176,7 @@ export async function POST(req: NextRequest) {
         const generatedText = parts[0].text;
         console.log("Content generated successfully via REST API.");
 
-        return NextResponse.json({ meetingRecord: generatedText ?? '' });
+        return NextResponse.json({ meetingMinutes: generatedText ?? '' });
 
     } catch (error: unknown) {
         // Removed unused 'errorOccurred = true;'

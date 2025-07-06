@@ -3,23 +3,21 @@ import { convertMarkdownToGoogleDocs } from '@/lib/markdown-to-docs';
 import { OAuth2Client } from 'google-auth-library';
 import { google } from 'googleapis';
 import { NextRequest, NextResponse } from 'next/server';
+import { getValidAccessToken } from '@/lib/token-manager';
+import { getOAuthConfig } from '@/lib/oauth-config';
+import { isValidEncryptedData } from '@/lib/crypto';
 
 /**
- * 匯出會議記錄到 Google Docs
+ * 匯出會議記錄到 Google Docs (使用 HttpOnly Cookie 認證)
  * 
  * POST /api/export-to-docs
  * Body: { markdownContent: string, title: string }
+ * Cookie: auth-token (HttpOnly)
  * 
  * 回應: { documentId: string, documentUrl: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    console.log('開始匯出 Google Docs 流程');
-    console.log('請求標頭:', {
-      authorization: req.headers.get('Authorization') ? '已提供' : '未提供',
-      contentType: req.headers.get('Content-Type')
-    });
-    
     // 解析請求內容
     const { markdownContent, title } = await req.json();
     
@@ -30,59 +28,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log('請求參數驗證完成，標題:', title);
-
-    // 從請求標頭中獲取 Authorization token
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // 從 Cookie 讀取加密的 refresh token
+    const encryptedRefreshToken = req.cookies.get('auth-token')?.value;
+    
+    if (!encryptedRefreshToken) {
       return NextResponse.json(
         { error: '需要用戶授權，請先登入 Google 帳戶' },
         { status: 401 }
       );
     }
-
-    const accessToken = authHeader.substring(7); // 移除 "Bearer " 前綴
-    console.log('Access Token 長度:', accessToken.length);
-    console.log('Access Token 前綴:', accessToken.substring(0, 20) + '...');
     
-    // 使用用戶的 Access Token 初始化 OAuth2 客戶端
-    // 注意：這裡我們不需要 redirect URI，因為我們使用的是已有的 access token
-    const oauth2Client = new OAuth2Client(
-      process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
-    );
-    oauth2Client.setCredentials({ access_token: accessToken });
-
-    console.log('OAuth2 客戶端初始化完成');
-
-    // 驗證 token 的有效性
-    try {
-      const tokenInfo = await oauth2Client.getTokenInfo(accessToken);
-      console.log('Token 驗證成功:', { 
-        scopes: tokenInfo.scopes, 
-        expiry: tokenInfo.expiry_date,
-        audience: tokenInfo.aud 
-      });
-      
-      // 檢查是否有 documents 權限
-      if (!tokenInfo.scopes?.includes('https://www.googleapis.com/auth/documents')) {
-        console.error('Token 缺少 documents 權限:', tokenInfo.scopes);
-        return NextResponse.json(
-          { error: '權限不足，請重新登入並授予 Google Docs 權限' },
-          { status: 403 }
-        );
-      }
-    } catch (tokenError) {
-      console.error('Token 驗證失敗:', tokenError);
+    // 驗證加密資料格式
+    if (!isValidEncryptedData(encryptedRefreshToken)) {
       return NextResponse.json(
-        { error: '無效的授權令牌，請重新登入' },
+        { error: '認證資料格式無效，請重新登入' },
         { status: 401 }
       );
     }
 
+    // 取得有效的 access token
+    let accessToken: string;
+    try {
+      accessToken = await getValidAccessToken(encryptedRefreshToken);
+    } catch (error) {
+      console.error('無法取得有效 access token:', error);
+      return NextResponse.json(
+        { error: '認證已過期，請重新登入' },
+        { status: 401 }
+      );
+    }
+    
+    // 取得 OAuth 設定
+    const oauthConfig = await getOAuthConfig();
+    
+    // 使用 access token 初始化 OAuth2 客戶端
+    const oauth2Client = new OAuth2Client(
+      oauthConfig.clientId,
+      oauthConfig.clientSecret
+    );
+    oauth2Client.setCredentials({ access_token: accessToken });
+
     // 初始化 Google APIs
     const docs = google.docs({ version: 'v1', auth: oauth2Client});
-
-    console.log('Google APIs 初始化完成');
 
     // 直接使用手動轉換方法（更可靠）
     return await handleManualConversion(docs, markdownContent, title);

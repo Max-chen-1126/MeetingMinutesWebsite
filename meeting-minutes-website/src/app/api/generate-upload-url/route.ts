@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from 'next/server'; // Import from next/ser
 
 // Keep the type definitions
 type GenerateUploadUrlResponse = {
-    signedUrl: string;
-    gcsPath: string;
+    uploadUrl: string;
+    fileName: string;
 };
 
 type ErrorResponse = {
@@ -13,7 +13,7 @@ type ErrorResponse = {
 };
 
 interface RequestBody {
-    filename?: unknown;
+    fileName?: unknown;
     contentType?: unknown;
 }
 
@@ -38,17 +38,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<GenerateUploa
     try {
         // Parse body using await req.json() for App Router
         const body = await req.json() as RequestBody;
-        const { filename, contentType } = body;
+        const { fileName, contentType } = body;
 
-        if (typeof filename !== 'string' || filename.trim() === '') {
-            return NextResponse.json({ error: 'Missing or invalid parameter: filename (must be a non-empty string)' }, { status: 400 });
+        if (typeof fileName !== 'string' || fileName.trim() === '') {
+            return NextResponse.json({ error: 'Missing or invalid parameter: fileName (must be a non-empty string)' }, { status: 400 });
         }
         if (typeof contentType !== 'string' || contentType.trim() === '') {
             return NextResponse.json({ error: 'Missing or invalid parameter: contentType (must be a non-empty string)' }, { status: 400 });
         }
 
         // Rest of the logic remains similar
-        const uniqueFilename = `${Date.now()}-${filename.replace(/\s+/g, '_')}`;
+        const uniqueFilename = `${Date.now()}-${fileName.replace(/\s+/g, '_')}`;
         const filePath = `uploads/${uniqueFilename}`;
 
         const options: GetSignedUrlConfig = {
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<GenerateUploa
         console.log(`Generated Signed URL for ${gcsPath}`);
 
         // Use NextResponse for App Router responses
-        return NextResponse.json({ signedUrl, gcsPath }); // Status 200 is default
+        return NextResponse.json({ uploadUrl: signedUrl, fileName: uniqueFilename }); // Status 200 is default
 
     } catch (error: unknown) {
         console.error('Error generating signed URL:', error);
