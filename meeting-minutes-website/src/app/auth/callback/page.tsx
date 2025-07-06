@@ -38,20 +38,11 @@ export default function AuthCallback() {
 
         const tokenData = await tokenResponse.json();
 
-        if (tokenResponse.ok && tokenData.access_token) {
-          // 將完整的 token 資訊存儲在 localStorage
-          const tokenInfo = {
-            access_token: tokenData.access_token,
-            refresh_token: tokenData.refresh_token,
-            expires_at: tokenData.expires_at,
-            token_type: tokenData.token_type || 'Bearer'
-          };
-          localStorage.setItem('googleTokenInfo', JSON.stringify(tokenInfo));
-          
-          // 重定向回首頁
+        if (tokenResponse.ok && tokenData.user) {
+          // 成功取得使用者資料，重定向回首頁
           router.push('/');
         } else {
-          console.error('獲取 access token 失敗:', tokenData.error);
+          console.error('獲取使用者資料失敗:', tokenData.error);
           router.push('/?error=' + encodeURIComponent('獲取 Google 授權失敗'));
         }
       } catch (error) {
