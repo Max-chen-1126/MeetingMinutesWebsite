@@ -2,7 +2,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react';
-import { AuthState, User, OAuthConfig, IAPUser, OAuthUser } from '@/types/auth';
+import { AuthState, IAPUser, OAuthUser } from '@/types/auth';
 
 export function useAuth() {
   const [authState, setAuthState] = useState<AuthState>({

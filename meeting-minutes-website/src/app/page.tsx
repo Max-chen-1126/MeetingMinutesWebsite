@@ -13,7 +13,7 @@ import { FileDropzone } from '@/components/FileDropzone'
 import { SuccessIndicator, ErrorIndicator } from '@/components/StatusIndicator'
 import { useExportToDocs } from '@/hooks/api/useDocsQuery'
 import { useProcessMeetingMinutes } from '@/hooks/api/useMinutesQuery'
-import { Copy, Trash2, FileDown, LogOut, User, Edit, Eye, AlertCircle, Shield } from 'lucide-react'
+import { Copy, Trash2, FileDown, LogOut, Edit, Eye, AlertCircle, Shield } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -44,7 +44,6 @@ export default function Home() {
     requestDocsPermission,
     logout,
     clearError,
-    iapUser,
     isIAPAuthenticated,
     isOAuthAuthenticated
   } = useAuth()

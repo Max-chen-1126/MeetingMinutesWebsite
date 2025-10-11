@@ -23,7 +23,7 @@ handlers:
 # 自動擴展配置 - 內部應用使用，低流量
 automatic_scaling:
   min_instances: 0
-  max_instances: 2  # 允許擴展到更多實例
+  max_instances: 2  
   target_cpu_utilization: 0.75
   target_throughput_utilization: 0.75
   max_concurrent_requests: 10  # 減少並發請求數量

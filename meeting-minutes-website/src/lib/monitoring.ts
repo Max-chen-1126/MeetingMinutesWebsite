@@ -1,5 +1,5 @@
 // src/lib/monitoring.ts
-import logger, { Timer } from './logger';
+import { Timer } from './logger';
 
 /**
  * 效能監控類別

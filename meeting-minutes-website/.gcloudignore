@@ -9,3 +9,6 @@ yarn-debug.log*
 yarn-error.log*
 CLAUDE.md
 doc/
+*.backup
+*/*.md
+.claude/
