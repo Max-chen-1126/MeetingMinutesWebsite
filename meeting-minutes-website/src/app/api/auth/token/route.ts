@@ -7,22 +7,45 @@ import { getUserInfo } from '@/lib/token-manager';
 
 /**
  * 將授權碼交換為 access token，並設定安全的 HttpOnly Cookie
- * 
+ *
  * POST /api/auth/token
  * Body: { code: string }
- * 
+ *
  * 回應: { user: { name, email, picture } }
  */
+
+// 記錄已處理的授權碼（防止重複使用）
+const processedCodes = new Set<string>();
+const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 分鐘清理一次
+
+// 定期清理過期的授權碼記錄
+setInterval(() => {
+  processedCodes.clear();
+  console.log('已清理授權碼緩存');
+}, CLEANUP_INTERVAL);
+
 export async function POST(req: NextRequest) {
   try {
     const { code } = await req.json();
-    
+
     if (!code) {
       return NextResponse.json(
         { error: '缺少授權碼' },
         { status: 400 }
       );
     }
+
+    // 檢查授權碼是否已被處理
+    if (processedCodes.has(code)) {
+      console.warn('偵測到重複的授權碼請求');
+      return NextResponse.json(
+        { error: '授權碼已被使用' },
+        { status: 400 }
+      );
+    }
+
+    // 標記為已處理
+    processedCodes.add(code);
 
     // 取得 OAuth 設定
     let oauthConfig;
