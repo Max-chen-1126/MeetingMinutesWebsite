@@ -1,3 +1,5 @@
+// src/app/page-upgraded.tsx
+// 升級版頁面 - 使用新的 Hooks 和 IAP 功能
 'use client'
 
 import React, { useState, useCallback, useEffect } from 'react'
@@ -9,7 +11,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import { FileDropzone } from '@/components/FileDropzone'
 import { SuccessIndicator, ErrorIndicator } from '@/components/StatusIndicator'
-import { Copy, Trash2, FileDown, LogOut, User, Edit, Eye } from 'lucide-react'
+import { useExportToDocs } from '@/hooks/api/useDocsQuery'
+import { useProcessMeetingMinutes } from '@/hooks/api/useMinutesQuery'
+import { Copy, Trash2, FileDown, LogOut, User, Edit, Eye, AlertCircle, Shield } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -21,23 +25,44 @@ export default function Home() {
   const [meetingDate, setMeetingDate] = useState('')
   const [participants, setParticipants] = useState('')
   const [additionalInfo, setAdditionalInfo] = useState('')
-  
+
   // UI 狀態
-  const [isLoading, setIsLoading] = useState(false)
-  const [isUploadingToGCS, setIsUploadingToGCS] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isCopied, setIsCopied] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
   const [exportSuccess, setExportSuccess] = useState<{ message: string; url: string } | null>(null)
   const [isPreviewMode, setIsPreviewMode] = useState(false)
-  
+
   // 檔案相關
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  
-  // 使用新的認證 Hook
-  const { user, isAuthenticated, login, logout, clearError } = useAuth()
+
+  // 使用新的認證 Hook（支援 IAP）
+  const {
+    user,
+    isAuthenticated,
+    isConfigLoading,
+    hasDocsPermission,
+    requestDocsPermission,
+    logout,
+    clearError,
+    iapUser,
+    isIAPAuthenticated,
+    isOAuthAuthenticated
+  } = useAuth()
+
+  // 使用新的 Docs 匯出 Hook
+  const exportMutation = useExportToDocs()
+
+  // 使用新的會議記錄處理 Hook（含上傳進度）
+  const {
+    processFile,
+    currentStep,
+    uploadProgress,
+    isLoading: isProcessingMinutes,
+    isUploading,
+    isGenerating,
+    error: processError,
+    reset: resetProcess
+  } = useProcessMeetingMinutes()
 
   // 保存會議記錄到 localStorage
   const saveMeetingDataToLocal = useCallback((data: {
@@ -80,87 +105,29 @@ export default function Home() {
     return false;
   }, []);
 
-  // 處理檔案選擇（只設置檔案，不自動開始處理）
+  // 處理檔案選擇
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file)
     setError(null)
     setExportSuccess(null)
   }, [])
 
-  // 開始處理音頻檔案
-  const handleStartProcessing = useCallback(() => {
+  // 開始處理音頻檔案（使用新的 Hook）
+  const handleStartProcessing = useCallback(async () => {
     if (!selectedFile) return
-    handleAudioUpload(selectedFile)
-  }, [selectedFile]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 處理音頻上傳和轉錄
-  const handleAudioUpload = async (file: File) => {
-    if (!file) return;
-
-    setIsProcessing(true);
-    setIsLoading(true);
-    setIsUploadingToGCS(true);
-    setError(null);
-    setExportSuccess(null);
 
     try {
-      // 步驟 1: 取得 GCS 簽署 URL
-      const uploadUrlResponse = await fetch('/api/generate-upload-url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type,
-        }),
-      });
+      setError(null)
 
-      if (!uploadUrlResponse.ok) {
-        throw new Error('無法取得上傳 URL');
-      }
+      const result = await processFile(selectedFile, {
+        meetingName: meetingName || '會議記錄',
+        meetingDate: meetingDate || new Date().toISOString().split('T')[0],
+        participants: participants || '',
+        additionalInfo: additionalInfo || ''
+      })
 
-      const { uploadUrl, fileName } = await uploadUrlResponse.json();
+      setMeetingRecord(result.meetingMinutes)
 
-      // 步驟 2: 上傳到 GCS
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': file.type,
-        },
-        body: file,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error('檔案上傳失敗');
-      }
-
-      setIsUploadingToGCS(false);
-      setIsGenerating(true);
-
-      // 步驟 3: 呼叫 Gemini API 生成會議記錄
-      const generateResponse = await fetch('/api/generate-minutes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileName: fileName,
-          meetingName: meetingName || '會議記錄',
-          meetingDate: meetingDate || new Date().toISOString().split('T')[0],
-          participants: participants || '',
-          additionalInfo: additionalInfo || ''
-        }),
-      });
-
-      const result = await generateResponse.json();
-
-      if (!generateResponse.ok) {
-        throw new Error(result.error || '生成會議記錄失敗');
-      }
-
-      setMeetingRecord(result.meetingMinutes);
-      
       // 保存到 localStorage
       saveMeetingDataToLocal({
         meetingRecord: result.meetingMinutes,
@@ -168,124 +135,104 @@ export default function Home() {
         meetingDate,
         participants,
         additionalInfo
-      });
+      })
 
     } catch (error) {
-      console.error('處理音頻檔案失敗:', error);
-      setError(error instanceof Error ? error.message : '處理音頻檔案失敗');
-      setSelectedFile(null); // 清除選擇的檔案
-    } finally {
-      setIsProcessing(false);
-      setIsLoading(false);
-      setIsUploadingToGCS(false);
-      setIsGenerating(false);
+      console.error('處理音頻檔案失敗:', error)
+      setError(error instanceof Error ? error.message : '處理音頻檔案失敗')
+      setSelectedFile(null)
     }
-  };
+  }, [selectedFile, meetingName, meetingDate, participants, additionalInfo, processFile, saveMeetingDataToLocal])
 
-  // Google Docs 匯出（使用新的 Cookie 認證）
-  const exportToGoogleDocs = async () => {
+  // Google Docs 匯出（使用新的 Hook）
+  const exportToGoogleDocs = useCallback(async () => {
     if (!meetingRecord) {
-      setError('沒有會議記錄可匯出');
-      return;
-    }
-    
-    if (!isAuthenticated) {
-      setError('請先登入 Google 帳戶');
-      return;
+      setError('沒有會議記錄可匯出')
+      return
     }
 
-    setIsExporting(true);
-    setError(null);
-    setExportSuccess(null);
-    
-    try {
-      const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`;
-      
-      const exportResponse = await fetch('/api/export-to-docs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
+    // 如果未登入或沒有 Docs 權限，觸發 OAuth 授權流程
+    if (!isAuthenticated || !hasDocsPermission) {
+      console.log('觸發 Google OAuth 授權流程...')
+      requestDocsPermission()
+      return
+    }
+
+    const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`
+
+    setError(null)
+    setExportSuccess(null)
+
+    exportMutation.mutate(
+      {
+        markdownContent: meetingRecord,
+        title: title
+      },
+      {
+        onSuccess: (data) => {
+          setExportSuccess({
+            message: `成功匯出到 Google Docs: ${title}`,
+            url: data.documentUrl
+          })
         },
-        credentials: 'include', // 包含 HttpOnly cookies
-        body: JSON.stringify({
-          markdownContent: meetingRecord,
-          title: title
-        })
-      });
-
-      const exportResult = await exportResponse.json();
-
-      if (!exportResponse.ok) {
-        if (exportResponse.status === 401) {
-          setError('認證已過期，請重新登入 Google 帳戶');
-        } else {
-          throw new Error(exportResult.error || '匯出失敗');
+        onError: (error) => {
+          setError(error.message)
         }
-        return;
       }
-
-      setExportSuccess({
-        message: `成功匯出到 Google Docs: ${title}`,
-        url: exportResult.documentUrl
-      });
-
-    } catch (error) {
-      console.error('匯出 Google Docs 失敗:', error);
-      setError(error instanceof Error ? error.message : '匯出 Google Docs 失敗');
-    } finally {
-      setIsExporting(false);
-    }
-  };
+    )
+  }, [meetingRecord, isAuthenticated, hasDocsPermission, meetingName, meetingDate, requestDocsPermission, exportMutation])
 
   // 複製會議記錄
   const copyToClipboard = async () => {
-    if (!meetingRecord) return;
-    
+    if (!meetingRecord) return
+
     try {
-      await navigator.clipboard.writeText(meetingRecord);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
+      await navigator.clipboard.writeText(meetingRecord)
+      setIsCopied(true)
+      setTimeout(() => setIsCopied(false), 2000)
     } catch (error) {
-      console.error('複製失敗:', error);
-      setError('複製到剪貼板失敗');
+      console.error('複製失敗:', error)
+      setError('複製到剪貼板失敗')
     }
-  };
+  }
 
   // 清除選擇的檔案
   const clearSelectedFile = useCallback(() => {
     setSelectedFile(null)
     setError(null)
     setExportSuccess(null)
-  }, [])
+    resetProcess()
+  }, [resetProcess])
 
   // 清除所有內容
   const clearAll = useCallback(() => {
-    setMeetingRecord('');
-    setMeetingName('');
-    setMeetingDate('');
-    setParticipants('');
-    setAdditionalInfo('');
-    setError(null);
-    setExportSuccess(null);
-    setSelectedFile(null);
+    setMeetingRecord('')
+    setMeetingName('')
+    setMeetingDate('')
+    setParticipants('')
+    setAdditionalInfo('')
+    setError(null)
+    setExportSuccess(null)
+    setSelectedFile(null)
+    resetProcess()
     try {
-      localStorage.removeItem('savedMeetingData');
+      localStorage.removeItem('savedMeetingData')
     } catch (error) {
-      console.warn('無法清除 localStorage:', error);
+      console.warn('無法清除 localStorage:', error)
     }
-  }, []);
+  }, [resetProcess])
 
   // 初始化時載入資料
   useEffect(() => {
-    loadMeetingDataFromLocal();
-  }, [loadMeetingDataFromLocal]);
+    loadMeetingDataFromLocal()
+  }, [loadMeetingDataFromLocal])
 
   // 清除錯誤
   useEffect(() => {
-    if (error) {
-      clearError();
+    if (error || processError) {
+      clearError()
     }
-  }, [error, clearError]);
+  }, [error, processError, clearError])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -302,15 +249,15 @@ export default function Home() {
                   上傳音頻檔案，AI 自動生成專業會議記錄並匯出到 Google Docs
                 </CardDescription>
               </div>
-              
-              {/* 認證狀態 */}
+
+              {/* 認證狀態（支援 IAP 和 OAuth） */}
               <div className="flex items-center gap-4">
                 {isAuthenticated && user ? (
                   <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
                     <div className="flex items-center gap-3">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img 
-                        src={user.picture} 
+                      <img
+                        src={user.picture}
                         alt={user.name}
                         className="w-10 h-10 rounded-full border-2 border-green-300"
                       />
@@ -318,30 +265,44 @@ export default function Home() {
                         <span className="text-sm font-medium text-green-800">
                           {user.name}
                         </span>
-                        <span className="text-xs text-green-600">
-                          已連結 Google 帳戶
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-green-600">
+                            {user.source === 'iap' ? (
+                              <span className="flex items-center gap-1">
+                                <Shield className="h-3 w-3" />
+                                IAP 認證
+                              </span>
+                            ) : (
+                              '已連結 Google 帳戶'
+                            )}
+                          </span>
+                          {!hasDocsPermission && isIAPAuthenticated && (
+                            <span className="flex items-center gap-1 text-xs text-orange-600">
+                              <AlertCircle className="h-3 w-3" />
+                              需授權 Docs
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={logout}
-                      className="border-green-300 text-green-700 hover:bg-green-100"
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      登出
-                    </Button>
+
+                    {/* 只有 OAuth 登入才顯示登出按鈕 */}
+                    {isOAuthAuthenticated && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={logout}
+                        className="border-green-300 text-green-700 hover:bg-green-100"
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        登出
+                      </Button>
+                    )}
                   </div>
                 ) : (
-                  <Button 
-                    onClick={login} 
-                    size="lg"
-                    className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-8 py-3 rounded-xl shadow-lg"
-                  >
-                    <User className="h-5 w-5 mr-2" />
-                    登入 Google
-                  </Button>
+                  <div className="text-gray-500 text-sm">
+                    {isConfigLoading ? '載入中...' : '未登入'}
+                  </div>
                 )}
               </div>
             </div>
@@ -350,11 +311,14 @@ export default function Home() {
 
         {/* 狀態指示器 */}
         <div className="space-y-6 mb-12">
-          {error && (
+          {(error || processError) && (
             <ErrorIndicator
               title="操作失敗"
-              message={error}
-              onDismiss={() => setError(null)}
+              message={error || processError?.message || '未知錯誤'}
+              onDismiss={() => {
+                setError(null)
+                resetProcess()
+              }}
             />
           )}
 
@@ -398,10 +362,10 @@ export default function Home() {
                       onChange={(e) => setMeetingName(e.target.value)}
                       placeholder="例如：產品規劃會議"
                       className="h-11"
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="meetingDate" className="text-sm font-medium text-gray-700">
                       會議日期
@@ -412,11 +376,11 @@ export default function Home() {
                       value={meetingDate}
                       onChange={(e) => setMeetingDate(e.target.value)}
                       className="h-11"
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="participants" className="text-sm font-medium text-gray-700">
                     與會人員
@@ -427,10 +391,10 @@ export default function Home() {
                     onChange={(e) => setParticipants(e.target.value)}
                     placeholder="例如：張三、李四、王五"
                     className="h-11"
-                    disabled={isProcessing}
+                    disabled={isProcessingMinutes}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="additionalInfo" className="text-sm font-medium text-gray-700">
                     其他資訊
@@ -442,7 +406,7 @@ export default function Home() {
                     placeholder="例如：會議目標、背景資訊等"
                     rows={4}
                     className="resize-none"
-                    disabled={isProcessing}
+                    disabled={isProcessingMinutes}
                   />
                 </div>
               </CardContent>
@@ -460,15 +424,31 @@ export default function Home() {
                 <FileDropzone
                   onFileSelect={handleFileSelect}
                   onFileRemove={clearSelectedFile}
-                  isLoading={isLoading}
-                  isUploading={isUploadingToGCS}
+                  isLoading={isProcessingMinutes}
+                  isUploading={isUploading}
                   isGenerating={isGenerating}
-                  isProcessing={isProcessing}
+                  isProcessing={isProcessingMinutes}
                   selectedFile={selectedFile}
                 />
-                
+
+                {/* 上傳進度條 */}
+                {isUploading && uploadProgress > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>上傳進度</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* 確認處理按鈕 */}
-                {selectedFile && !isProcessing && (
+                {selectedFile && !isProcessingMinutes && currentStep === 'idle' && (
                   <div className="flex justify-center pt-4">
                     <Button
                       onClick={handleStartProcessing}
@@ -493,43 +473,47 @@ export default function Home() {
                     AI 生成的會議記錄將顯示在這裡，您可以編輯和匯出
                   </CardDescription>
                 </div>
-                
+
                 {/* 操作按鈕 */}
                 {meetingRecord && (
                   <div className="flex flex-wrap gap-3 pt-2 border-t">
                     <Button
                       variant="outline"
                       onClick={copyToClipboard}
-                      disabled={!meetingRecord || isProcessing}
+                      disabled={!meetingRecord || isProcessingMinutes}
                       className="flex items-center gap-2"
                     >
                       <Copy className="h-4 w-4" />
                       {isCopied ? '已複製' : '複製內容'}
                     </Button>
-                    
+
                     <Button
                       variant="outline"
                       onClick={clearAll}
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                       className="flex items-center gap-2 text-red-600 border-red-200 hover:bg-red-50"
                     >
                       <Trash2 className="h-4 w-4" />
                       清除全部
                     </Button>
-                    
+
                     <Button
                       onClick={exportToGoogleDocs}
-                      disabled={!meetingRecord || isExporting || !isAuthenticated || isProcessing}
+                      disabled={!meetingRecord || exportMutation.isPending || isProcessingMinutes}
                       className="flex items-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white"
                     >
                       <FileDown className="h-4 w-4" />
-                      {isExporting ? '匯出中...' : '匯出到 Google Docs'}
+                      {exportMutation.isPending
+                        ? '匯出中...'
+                        : hasDocsPermission
+                          ? '匯出到 Google Docs'
+                          : '授權並匯出'}
                     </Button>
                   </div>
                 )}
               </div>
             </CardHeader>
-            
+
             <CardContent>
               {meetingRecord ? (
                 <div className="space-y-4">
@@ -538,11 +522,11 @@ export default function Home() {
                     <button
                       onClick={() => setIsPreviewMode(false)}
                       className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        !isPreviewMode 
-                          ? 'border-blue-500 text-blue-600' 
+                        !isPreviewMode
+                          ? 'border-blue-500 text-blue-600'
                           : 'border-transparent text-gray-500 hover:text-gray-700'
                       }`}
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                     >
                       <Edit className="h-4 w-4" />
                       編輯
@@ -550,31 +534,21 @@ export default function Home() {
                     <button
                       onClick={() => setIsPreviewMode(true)}
                       className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        isPreviewMode 
-                          ? 'border-blue-500 text-blue-600' 
+                        isPreviewMode
+                          ? 'border-blue-500 text-blue-600'
                           : 'border-transparent text-gray-500 hover:text-gray-700'
                       }`}
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                     >
                       <Eye className="h-4 w-4" />
                       預覽
                     </button>
                   </div>
-                  
+
                   {/* 內容區域 */}
                   {isPreviewMode ? (
-                    <div className="min-h-[500px] p-4 border border-gray-200 rounded-lg bg-white">
-                      <div className="prose prose-sm max-w-none
-                          prose-headings:text-gray-800 prose-headings:font-semibold
-                          prose-p:text-gray-700 prose-p:leading-relaxed
-                          prose-ul:text-gray-700 prose-ol:text-gray-700
-                          prose-li:text-gray-700 prose-li:marker:text-gray-500
-                          prose-blockquote:text-gray-600 prose-blockquote:border-l-gray-300
-                          prose-code:text-pink-600 prose-code:bg-pink-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                          prose-pre:bg-gray-800 prose-pre:text-gray-100
-                          prose-table:text-sm prose-th:bg-gray-50 prose-th:font-medium
-                          prose-td:border-gray-200 prose-th:border-gray-200
-                          prose-strong:text-gray-800 prose-em:text-gray-700">
+                    <div className="h-[600px] overflow-y-auto p-6 border border-gray-200 rounded-lg bg-white">
+                      <div className="markdown-body">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           rehypePlugins={[rehypeHighlight]}
@@ -587,12 +561,12 @@ export default function Home() {
                     <Textarea
                       value={meetingRecord}
                       onChange={(e) => setMeetingRecord(e.target.value)}
-                      className="min-h-[500px] font-mono text-sm leading-relaxed resize-none border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                      className="h-[600px] font-mono text-sm leading-relaxed resize-none border-gray-200 focus:border-blue-500 focus:ring-blue-500 overflow-y-auto"
                       placeholder="會議記錄將出現在這裡..."
-                      disabled={isProcessing}
+                      disabled={isProcessingMinutes}
                     />
                   )}
-                  
+
                   <div className="text-xs text-gray-500 text-right">
                     字數：{meetingRecord.length} | 行數：{meetingRecord.split('\n').length}
                   </div>
@@ -619,5 +593,5 @@ export default function Home() {
         </div>
       </div>
     </div>
-  );
+  )
 }
