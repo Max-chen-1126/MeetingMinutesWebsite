@@ -1,6 +1,7 @@
 /* 基本引入 */
 @import "tailwindcss";
 @import "tw-animate-css";
+@import 'github-markdown-css/github-markdown.css';
 
 /* 暗黑模式變體設定 */
 @custom-variant dark (&:is(.dark *));

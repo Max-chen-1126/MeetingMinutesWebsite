@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     try {
         // --- Step 1: Get Request Body (JSON) ---
         const body = await req.json();
-        receivedGcsPath = typeof body.gcsPath === 'string' ? body.gcsPath : null;
+        const fileName = typeof body.fileName === 'string' ? body.fileName : null;
         const contentType = typeof body.contentType === 'string' ? body.contentType : 'audio/mpeg';
         const meetingName = body.meetingName || '未提供';
         const meetingDate = body.meetingDate || '未提供';
@@ -62,15 +62,23 @@ export async function POST(req: NextRequest) {
         const additionalInfo = body.additionalInfo || '無';
 
         // --- Input Validation ---
-        if (!receivedGcsPath) {
+        if (!fileName) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Missing required parameter: gcsPath';
+            errorMessage = 'Missing required parameter: fileName';
             throw new Error(errorMessage);
         }
+        
+        // Build GCS path from fileName
+        const bucketName = process.env.GCS_BUCKET_NAME;
+        if (!bucketName) {
+            errorMessage = 'Server configuration error: GCS_BUCKET_NAME not set';
+            throw new Error(errorMessage);
+        }
+        receivedGcsPath = `gs://${bucketName}/uploads/${fileName}`;
         const parsedPath = parseGcsPath(receivedGcsPath);
         if (!parsedPath) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Invalid GCS path format. Expected gs://bucket-name/file/path';
+            errorMessage = 'Failed to parse GCS path from fileName';
             throw new Error(errorMessage);
         }
         // NOTE: The ESLint error about unused 'filePath' might be specific to a scope
@@ -91,14 +99,58 @@ export async function POST(req: NextRequest) {
         console.log("Access token obtained.");
 
         // --- Step 3: Construct Prompt & REST API Request Body ---
-        const textPrompt = `請根據以下資訊和提供的音檔生成一份詳細的會議記錄：
-          會議名稱：${meetingName}
-          會議時間：${meetingDate}
-          參與人員：${participants}
-          其他資訊：${additionalInfo}
-          請根據音檔內容整理出會議的主要討論內容、決策事項和待辦事項。
-          輸出格式請使用 Markdown。直接輸出會議記錄即可，使用三個點以及 Markdown 輸出會議記錄內容 :
-        `;
+        const textPrompt = `你是一位專業的會議記錄助理。請根據以下會議資訊和提供的音檔，生成一份專業、清晰且結構化的會議記錄。
+
+            # 會議資訊
+            - **會議名稱**: ${meetingName}
+            - **會議時間**: ${meetingDate}
+            - **與會人員**: ${participants}
+            - **補充資訊**: ${additionalInfo}
+
+            ---
+
+            # 會議記錄範本與指示
+            請嚴格遵循以下 Markdown 格式與結構，並**全程使用繁體中文**進行輸出。
+            **所有列表項目都必須使用 "- " (一個減號後加一個空格) 來建立，以確保格式能被正確解析。**
+
+            ## 📝 會議資訊 (Meeting Information)
+            
+            ### 會議名稱 : [請填寫會議名稱]
+            ### 會議時間 : [請填寫會議時間]
+            ### 與會人員 : [請填寫與會人員]
+            ### 補充資訊 : [請填寫補充資訊]
+
+            ## 🚀 會議重點 (Key Takeaways)
+            (在此簡潔地總結 3-5 個最重要的結論與決策)
+            - [重點一]
+            - [重點二]
+
+            ## 💬 會議詳情 (Meeting Details)
+            (依據討論的議題分點記錄，每個議題都應包含「討論過程」與「結論」)
+
+            ### 議題一：[請填寫議題標題]
+            - **討論過程**：
+            - [詳細記錄討論的過程、提出的觀點、數據等]
+            - **結論**：
+            - [記錄此議題最終達成的共識或決定]
+
+            ### 議題二：[請填寫議題標題]
+            - **討論過程**：
+            - [詳細記錄...]
+            - **結論**：
+            - [記錄...]
+            (若有更多議題，請依此類推)
+
+            ## ✅ 行動項目 (Action Items)
+            (使用 Markdown 表格清楚列出所有待辦事項、負責人及建議完成日期)
+            | 待辦事項 | 負責人/團隊 | 建議完成日期 |
+            |:---|:---|:---|
+            | [具體的行動項目] | [姓名或團隊名稱] | [YYYY-MM-DD] |
+            | [具體的行動項目] | [姓名或團隊名稱] | [YYYY-MM-DD] |
+
+            ---
+
+            請直接開始輸出 Markdown 格式的會議記錄，不要包含任何前言或結語。`;
 
         const requestPayload = {
             contents: [{
@@ -168,7 +220,7 @@ export async function POST(req: NextRequest) {
         const generatedText = parts[0].text;
         console.log("Content generated successfully via REST API.");
 
-        return NextResponse.json({ meetingRecord: generatedText ?? '' });
+        return NextResponse.json({ meetingMinutes: generatedText ?? '' });
 
     } catch (error: unknown) {
         // Removed unused 'errorOccurred = true;'
