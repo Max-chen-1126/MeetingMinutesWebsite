@@ -33,12 +33,25 @@ export async function verifyIAPToken(iapJwt: string): Promise<IAPUser> {
     // 生產環境：使用 Google Auth Library 驗證 JWT
     const oAuth2Client = new OAuth2Client();
 
+    // IAP JWT 的 audience 格式: /projects/PROJECT_NUMBER/apps/PROJECT_ID
+    // 注意：需要 PROJECT_NUMBER，不是 PROJECT_ID
+    // 如果沒有設定 PROJECT_NUMBER，可以從 Cloud Console 取得或使用 gcloud projects describe
+    const projectNumber = process.env.PROJECT_NUMBER;
+
     // 驗證 token
-    const ticket = await oAuth2Client.verifyIdToken({
+    const verifyOptions: { idToken: string; audience?: string } = {
       idToken: iapJwt,
-      // IAP 使用特定的 audience 格式
-      // 如果不確定 audience，可以先不驗證，只解碼
-    });
+    };
+
+    // 如果有設定 PROJECT_NUMBER，則驗證 audience
+    if (projectNumber) {
+      verifyOptions.audience = `/projects/${projectNumber}/apps/${projectId}`;
+      console.log(`驗證 IAP JWT with audience: ${verifyOptions.audience}`);
+    } else {
+      console.warn('⚠️  PROJECT_NUMBER 未設定，跳過 audience 驗證。建議在生產環境設定 PROJECT_NUMBER 以提高安全性。');
+    }
+
+    const ticket = await oAuth2Client.verifyIdToken(verifyOptions);
 
     const payload = ticket.getPayload();
 
