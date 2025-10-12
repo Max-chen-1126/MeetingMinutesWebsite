@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
             ---
 
             # 會議記錄範本與指示
-            請嚴格遵循以下 Markdown 格式與結構。
+            請嚴格遵循以下 Markdown 格式與結構，並**全程使用繁體中文**進行輸出。
             **所有列表項目都必須使用 "- " (一個減號後加一個空格) 來建立，以確保格式能被正確解析。**
 
             ## 📝 會議資訊 (Meeting Information)
