@@ -26,6 +26,6 @@ automatic_scaling:
   max_instances: 2  
   target_cpu_utilization: 0.75
   target_throughput_utilization: 0.75
-  max_concurrent_requests: 10  # 減少並發請求數量
+  max_concurrent_requests: 30  # F1 實例可處理的併發請求數
   min_pending_latency: 5000ms  # 更寬容的延遲設定
   max_pending_latency: 10000ms
