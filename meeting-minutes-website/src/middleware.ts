@@ -40,10 +40,23 @@ export function middleware(request: NextRequest) {
         process.env.NEXT_PUBLIC_BASE_URL,
       ].filter(Boolean);
 
+      // 檢查是否為本地開發環境
+      const isLocalDev = host?.includes('localhost') || host?.includes('127.0.0.1');
+
+      // 如果沒有 Origin header 且非本地開發，拒絕請求
+      if (!origin && !isLocalDev) {
+        console.warn(`CSRF 檢查失敗: 缺少 Origin header, Host=${host}`);
+        return NextResponse.json(
+          { error: 'CSRF 驗證失敗: 缺少 Origin header' },
+          { status: 403 }
+        );
+      }
+
+      // 如果有 Origin header，檢查是否在允許清單中
       if (origin && !allowedOrigins.includes(origin)) {
         console.warn(`CSRF 檢查失敗: Origin=${origin}, Host=${host}`);
         return NextResponse.json(
-          { error: 'CSRF 驗證失敗' },
+          { error: 'CSRF 驗證失敗: Origin 不在允許清單' },
           { status: 403 }
         );
       }
