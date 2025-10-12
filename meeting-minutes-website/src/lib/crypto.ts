@@ -7,9 +7,9 @@ import { getSecret } from './secrets';
  */
 async function getEncryptionKey(): Promise<Buffer> {
   // 判斷是否在生產環境
-  const isProduction = process.env.GOOGLE_CLOUD_PROJECT && 
-                       process.env.NODE_ENV === 'production' ||
-                       process.env.DEPLOYMENT_ENV === 'production';
+  const isProduction = (process.env.NODE_ENV === 'production' ||
+                       process.env.DEPLOYMENT_ENV === 'production') &&
+                       !!process.env.GOOGLE_CLOUD_PROJECT;
   
   let encryptionKey: string;
   
@@ -50,16 +50,8 @@ async function getEncryptionKey(): Promise<Buffer> {
   }
   
   // 確保金鑰長度為 32 字節（AES-256 要求）
-  if (keyBuffer.length < 32) {
-    // 如果金鑰太短，用零填充到 32 字節
-    const paddedKey = Buffer.alloc(32);
-    keyBuffer.copy(paddedKey);
-    keyBuffer = paddedKey;
-    console.warn('加密金鑰長度不足，已填充到 32 字節');
-  } else if (keyBuffer.length > 32) {
-    // 如果金鑰太長，取前 32 字節
-    keyBuffer = keyBuffer.subarray(0, 32);
-    console.warn('加密金鑰過長，已截取前 32 字節');
+  if (keyBuffer.length !== 32) {
+    throw new Error(`無效的加密金鑰長度: ${keyBuffer.length} bytes。TOKEN_ENCRYPTION_KEY 必須為 32 bytes (AES-256 要求)`);
   }
   
   return keyBuffer;
