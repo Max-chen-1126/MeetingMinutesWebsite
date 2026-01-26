@@ -5,7 +5,7 @@ env_variables:
   PROJECT_ID: 'tw-maxchens-sandbox'
   GCS_BUCKET_NAME: 'meeting-audio-maxtest'
   # 例如：us-central1, asia-east1, etc.
-  LOCATION: 'us-central1'
+  LOCATION: 'global'
 
   # 明確設置為生產環境
   NODE_ENV: 'production'

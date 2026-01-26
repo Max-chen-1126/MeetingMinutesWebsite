@@ -190,21 +190,16 @@ export function useAuth() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        console.log('OAuth 設定載入成功:', {
-          hasClientId: !!data.clientId,
-          baseUrl: data.baseUrl
-        });
-
-        setAuthState(prev => ({
-          ...prev,
-          oauthConfig: {
-            clientId: data.clientId,
-            baseUrl: data.baseUrl
-          },
-          isConfigLoading: false
-        }));
+          setAuthState((prev) => ({
+              ...prev,
+              oauthConfig: {
+                  clientId: data.clientId,
+                  baseUrl: data.baseUrl,
+              },
+              isConfigLoading: false,
+          }));
       } else {
-        throw new Error(data.error || '載入 OAuth 設定失敗');
+          throw new Error(data.error || "載入 OAuth 設定失敗");
       }
     } catch (error) {
       console.error('載入 OAuth 設定失敗:', error);

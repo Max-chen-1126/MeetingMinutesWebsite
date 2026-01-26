@@ -173,9 +173,6 @@ export async function POST(req: NextRequest) {
                 temperature: 1.0, // Gemini 3 recommends default 1.0 for optimal reasoning
                 maxOutputTokens: 8192,
             },
-            thinkingConfig: {
-                thinkingLevel: "low", // Start with low for testing; can upgrade to "high" later
-            },
         };
 
         // --- Step 4: Call Gemini REST API ---
