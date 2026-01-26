@@ -13,584 +13,642 @@ import { FileDropzone } from '@/components/FileDropzone'
 import { SuccessIndicator, ErrorIndicator } from '@/components/StatusIndicator'
 import { useExportToDocs } from '@/hooks/api/useDocsQuery'
 import { useProcessMeetingMinutes } from '@/hooks/api/useMinutesQuery'
-import { Copy, Trash2, FileDown, LogOut, Edit, Eye, AlertCircle, Shield } from 'lucide-react'
+import { Copy, Trash2, FileDown, LogOut } from "lucide-react";
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import { toast } from "sonner";
 
 export default function Home() {
-  // 會議記錄相關狀態
-  const [meetingRecord, setMeetingRecord] = useState('')
-  const [meetingName, setMeetingName] = useState('')
-  const [meetingDate, setMeetingDate] = useState('')
-  const [participants, setParticipants] = useState('')
-  const [additionalInfo, setAdditionalInfo] = useState('')
+    // 會議記錄相關狀態
+    const [meetingRecord, setMeetingRecord] = useState("");
+    const [meetingName, setMeetingName] = useState("");
+    const [meetingDate, setMeetingDate] = useState("");
+    const [participants, setParticipants] = useState("");
+    const [additionalInfo, setAdditionalInfo] = useState("");
 
-  // UI 狀態
-  const [error, setError] = useState<string | null>(null)
-  const [isCopied, setIsCopied] = useState(false)
-  const [exportSuccess, setExportSuccess] = useState<{ message: string; url: string } | null>(null)
-  const [isPreviewMode, setIsPreviewMode] = useState(false)
+    // UI 狀態
+    const [error, setError] = useState<string | null>(null);
+    const [exportSuccess, setExportSuccess] = useState<{
+        message: string;
+        url: string;
+    } | null>(null);
+    const [isPreviewMode, setIsPreviewMode] = useState(false);
 
-  // 檔案相關
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    // 檔案相關
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // 使用新的認證 Hook（支援 IAP）
-  const {
-    user,
-    isAuthenticated,
-    isConfigLoading,
-    hasDocsPermission,
-    requestDocsPermission,
-    logout,
-    clearError,
-    isIAPAuthenticated,
-    isOAuthAuthenticated
-  } = useAuth()
+    // 使用新的認證 Hook（支援 IAP）
+    const {
+        user,
+        isAuthenticated,
+        isConfigLoading,
+        hasDocsPermission,
+        requestDocsPermission,
+        logout,
+        clearError,
+        isOAuthAuthenticated,
+    } = useAuth();
 
-  // 使用新的 Docs 匯出 Hook
-  const exportMutation = useExportToDocs()
+    // 使用新的 Docs 匯出 Hook
+    const exportMutation = useExportToDocs();
 
-  // 使用新的會議記錄處理 Hook（含上傳進度）
-  const {
-    processFile,
-    currentStep,
-    uploadProgress,
-    isLoading: isProcessingMinutes,
-    isUploading,
-    isGenerating,
-    error: processError,
-    reset: resetProcess
-  } = useProcessMeetingMinutes()
+    // 使用新的會議記錄處理 Hook（含上傳進度）
+    const {
+        processFile,
+        currentStep,
+        uploadProgress,
+        isLoading: isProcessingMinutes,
+        isUploading,
+        isGenerating,
+        error: processError,
+        reset: resetProcess,
+    } = useProcessMeetingMinutes();
 
-  // 保存會議記錄到 localStorage
-  const saveMeetingDataToLocal = useCallback((data: {
-    meetingRecord: string;
-    meetingName: string;
-    meetingDate: string;
-    participants: string;
-    additionalInfo: string;
-  }) => {
-    try {
-      localStorage.setItem('savedMeetingData', JSON.stringify({
-        ...data,
-        timestamp: Date.now()
-      }));
-    } catch (error) {
-      console.warn('無法保存會議記錄到 localStorage:', error);
-    }
-  }, []);
+    // 保存會議記錄到 localStorage
+    const saveMeetingDataToLocal = useCallback(
+        (data: {
+            meetingRecord: string;
+            meetingName: string;
+            meetingDate: string;
+            participants: string;
+            additionalInfo: string;
+        }) => {
+            try {
+                localStorage.setItem(
+                    "savedMeetingData",
+                    JSON.stringify({
+                        ...data,
+                        timestamp: Date.now(),
+                    }),
+                );
+            } catch (error) {
+                console.warn("無法保存會議記錄到 localStorage:", error);
+            }
+        },
+        [],
+    );
 
-  // 從 localStorage 恢復會議記錄
-  const loadMeetingDataFromLocal = useCallback(() => {
-    try {
-      const savedData = localStorage.getItem('savedMeetingData');
-      if (savedData) {
-        const parsedData = JSON.parse(savedData);
-        // 檢查是否是最近 24 小時內的數據
-        const isRecent = Date.now() - parsedData.timestamp < 24 * 60 * 60 * 1000;
-        if (isRecent) {
-          setMeetingRecord(parsedData.meetingRecord || '');
-          setMeetingName(parsedData.meetingName || '');
-          setMeetingDate(parsedData.meetingDate || '');
-          setParticipants(parsedData.participants || '');
-          setAdditionalInfo(parsedData.additionalInfo || '');
-          return true;
+    // 從 localStorage 恢復會議記錄
+    const loadMeetingDataFromLocal = useCallback(() => {
+        try {
+            const savedData = localStorage.getItem("savedMeetingData");
+            if (savedData) {
+                const parsedData = JSON.parse(savedData);
+                // 檢查是否是最近 24 小時內的數據
+                const isRecent =
+                    Date.now() - parsedData.timestamp < 24 * 60 * 60 * 1000;
+                if (isRecent) {
+                    setMeetingRecord(parsedData.meetingRecord || "");
+                    setMeetingName(parsedData.meetingName || "");
+                    setMeetingDate(parsedData.meetingDate || "");
+                    setParticipants(parsedData.participants || "");
+                    setAdditionalInfo(parsedData.additionalInfo || "");
+                    return true;
+                }
+            }
+        } catch (error) {
+            console.warn("無法從 localStorage 讀取會議記錄:", error);
         }
-      }
-    } catch (error) {
-      console.warn('無法從 localStorage 讀取會議記錄:', error);
-    }
-    return false;
-  }, []);
+        return false;
+    }, []);
 
-  // 處理檔案選擇
-  const handleFileSelect = useCallback((file: File) => {
-    setSelectedFile(file)
-    setError(null)
-    setExportSuccess(null)
-  }, [])
+    // 處理檔案選擇
+    const handleFileSelect = useCallback((file: File) => {
+        setSelectedFile(file);
+        setError(null);
+        setExportSuccess(null);
+    }, []);
 
-  // 開始處理音頻檔案（使用新的 Hook）
-  const handleStartProcessing = useCallback(async () => {
-    if (!selectedFile) return
+    // 開始處理音頻檔案（使用新的 Hook）
+    const handleStartProcessing = useCallback(async () => {
+        if (!selectedFile) return;
 
-    try {
-      setError(null)
+        try {
+            setError(null);
 
-      const result = await processFile(selectedFile, {
-        meetingName: meetingName || '會議記錄',
-        meetingDate: meetingDate || new Date().toISOString().split('T')[0],
-        participants: participants || '',
-        additionalInfo: additionalInfo || ''
-      })
+            const result = await processFile(selectedFile, {
+                meetingName: meetingName || "會議記錄",
+                meetingDate: meetingDate || new Date().toISOString().split("T")[0],
+                participants: participants || "",
+                additionalInfo: additionalInfo || "",
+            });
 
-      setMeetingRecord(result.meetingMinutes)
+            setMeetingRecord(result.meetingMinutes);
 
-      // 保存到 localStorage
-      saveMeetingDataToLocal({
-        meetingRecord: result.meetingMinutes,
+            // 保存到 localStorage
+            saveMeetingDataToLocal({
+                meetingRecord: result.meetingMinutes,
+                meetingName,
+                meetingDate,
+                participants,
+                additionalInfo,
+            });
+        } catch (error) {
+            console.error("處理音頻檔案失敗:", error);
+            setError(error instanceof Error ? error.message : "處理音頻檔案失敗");
+            setSelectedFile(null);
+        }
+    }, [
+        selectedFile,
         meetingName,
         meetingDate,
         participants,
-        additionalInfo
-      })
+        additionalInfo,
+        processFile,
+        saveMeetingDataToLocal,
+    ]);
 
-    } catch (error) {
-      console.error('處理音頻檔案失敗:', error)
-      setError(error instanceof Error ? error.message : '處理音頻檔案失敗')
-      setSelectedFile(null)
-    }
-  }, [selectedFile, meetingName, meetingDate, participants, additionalInfo, processFile, saveMeetingDataToLocal])
-
-  // Google Docs 匯出（使用新的 Hook）
-  const exportToGoogleDocs = useCallback(async () => {
-    if (!meetingRecord) {
-      setError('沒有會議記錄可匯出')
-      return
-    }
-
-    // 如果未登入或沒有 Docs 權限，觸發 OAuth 授權流程
-    if (!isAuthenticated || !hasDocsPermission) {
-      console.log('觸發 Google OAuth 授權流程...')
-      requestDocsPermission()
-      return
-    }
-
-    const title = meetingName || `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`
-
-    setError(null)
-    setExportSuccess(null)
-
-    exportMutation.mutate(
-      {
-        markdownContent: meetingRecord,
-        title: title
-      },
-      {
-        onSuccess: (data) => {
-          setExportSuccess({
-            message: `成功匯出到 Google Docs: ${title}`,
-            url: data.documentUrl
-          })
-        },
-        onError: (error) => {
-          setError(error.message)
+    // Google Docs 匯出（使用新的 Hook）
+    const exportToGoogleDocs = useCallback(async () => {
+        if (!meetingRecord) {
+            setError("沒有會議記錄可匯出");
+            return;
         }
-      }
-    )
-  }, [meetingRecord, isAuthenticated, hasDocsPermission, meetingName, meetingDate, requestDocsPermission, exportMutation])
 
-  // 複製會議記錄
-  const copyToClipboard = async () => {
-    if (!meetingRecord) return
+        // 如果未登入或沒有 Docs 權限，觸發 OAuth 授權流程
+        if (!isAuthenticated || !hasDocsPermission) {
+            console.log("觸發 Google OAuth 授權流程...");
+            requestDocsPermission();
+            return;
+        }
 
-    try {
-      await navigator.clipboard.writeText(meetingRecord)
-      setIsCopied(true)
-      setTimeout(() => setIsCopied(false), 2000)
-    } catch (error) {
-      console.error('複製失敗:', error)
-      setError('複製到剪貼板失敗')
-    }
-  }
+        const title =
+            meetingName ||
+            `會議記錄 - ${meetingDate || new Date().toLocaleDateString()}`;
 
-  // 清除選擇的檔案
-  const clearSelectedFile = useCallback(() => {
-    setSelectedFile(null)
-    setError(null)
-    setExportSuccess(null)
-    resetProcess()
-  }, [resetProcess])
+        setError(null);
+        setExportSuccess(null);
 
-  // 清除所有內容
-  const clearAll = useCallback(() => {
-    setMeetingRecord('')
-    setMeetingName('')
-    setMeetingDate('')
-    setParticipants('')
-    setAdditionalInfo('')
-    setError(null)
-    setExportSuccess(null)
-    setSelectedFile(null)
-    resetProcess()
-    try {
-      localStorage.removeItem('savedMeetingData')
-    } catch (error) {
-      console.warn('無法清除 localStorage:', error)
-    }
-  }, [resetProcess])
+        exportMutation.mutate(
+            {
+                markdownContent: meetingRecord,
+                title: title,
+            },
+            {
+                onSuccess: (data) => {
+                    setExportSuccess({
+                        message: `成功匯出到 Google Docs: ${title}`,
+                        url: data.documentUrl,
+                    });
+                },
+                onError: (error) => {
+                    setError(error.message);
+                },
+            },
+        );
+    }, [
+        meetingRecord,
+        isAuthenticated,
+        hasDocsPermission,
+        meetingName,
+        meetingDate,
+        requestDocsPermission,
+        exportMutation,
+    ]);
 
-  // 初始化時載入資料
-  useEffect(() => {
-    loadMeetingDataFromLocal()
-  }, [loadMeetingDataFromLocal])
+    // 複製會議記錄
+    const copyToClipboard = async () => {
+        if (!meetingRecord) return;
 
-  // 清除錯誤
-  useEffect(() => {
-    if (error || processError) {
-      clearError()
-    }
-  }, [error, processError, clearError])
+        try {
+            await navigator.clipboard.writeText(meetingRecord);
+            toast.success("已複製到剪貼板");
+        } catch (error) {
+            console.error("複製失敗:", error);
+            toast.error("複製到剪貼板失敗");
+            setError("複製到剪貼板失敗");
+        }
+    };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      <div className="container mx-auto px-4 py-12 max-w-7xl">
-        {/* 標題與認證區域 */}
-        <Card className="mb-12 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
-          <CardHeader className="pb-8">
-            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-6">
-              <div className="space-y-2">
-                <CardTitle className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  AI 會議記錄生成器
-                </CardTitle>
-                <CardDescription className="text-lg text-gray-600">
-                  上傳音頻檔案，AI 自動生成專業會議記錄並匯出到 Google Docs
-                </CardDescription>
-              </div>
+    // 清除選擇的檔案
+    const clearSelectedFile = useCallback(() => {
+        setSelectedFile(null);
+        setError(null);
+        setExportSuccess(null);
+        resetProcess();
+    }, [resetProcess]);
 
-              {/* 認證狀態（支援 IAP 和 OAuth） */}
-              <div className="flex items-center gap-4">
-                {isAuthenticated && user ? (
-                  <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
-                    <div className="flex items-center gap-3">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={user.picture}
-                        alt={user.name}
-                        className="w-10 h-10 rounded-full border-2 border-green-300"
-                      />
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-green-800">
-                          {user.name}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-green-600">
-                            {user.source === 'iap' ? (
-                              <span className="flex items-center gap-1">
-                                <Shield className="h-3 w-3" />
-                                IAP 認證
-                              </span>
-                            ) : (
-                              '已連結 Google 帳戶'
-                            )}
-                          </span>
-                          {!hasDocsPermission && isIAPAuthenticated && (
-                            <span className="flex items-center gap-1 text-xs text-orange-600">
-                              <AlertCircle className="h-3 w-3" />
-                              需授權 Docs
-                            </span>
-                          )}
+    // 清除所有內容
+    const clearAll = useCallback(() => {
+        setMeetingRecord("");
+        setMeetingName("");
+        setMeetingDate("");
+        setParticipants("");
+        setAdditionalInfo("");
+        setError(null);
+        setExportSuccess(null);
+        setSelectedFile(null);
+        resetProcess();
+        try {
+            localStorage.removeItem("savedMeetingData");
+        } catch (error) {
+            console.warn("無法清除 localStorage:", error);
+        }
+    }, [resetProcess]);
+
+    // 初始化時載入資料
+    useEffect(() => {
+        loadMeetingDataFromLocal();
+    }, [loadMeetingDataFromLocal]);
+
+    // 清除錯誤
+    useEffect(() => {
+        if (error || processError) {
+            clearError();
+        }
+    }, [error, processError, clearError]);
+
+    return (
+        <div className="min-h-screen bg-background selection:bg-primary/10 selection:text-primary">
+            <div className="container mx-auto px-4 py-12 max-w-6xl">
+                {/* 標題與認證區域 */}
+                <div className="mb-12">
+                    <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-6 mb-8">
+                        <div className="space-y-3">
+                            <h1 className="text-4xl lg:text-5xl font-bold tracking-tight text-foreground">
+                                AI 會議記錄生成
+                            </h1>
+                            <p className="text-lg text-muted-foreground font-light max-w-2xl">
+                                上傳音頻，讓 Gemini 3.0 協助生成專業的會議記錄並匯出
+                            </p>
                         </div>
-                      </div>
+
+                        {/* 認證狀態 */}
+                        <div className="flex items-center gap-4">
+                            {isAuthenticated && user ? (
+                                <div className="flex items-center gap-3 pl-4 pr-2 py-1.5 bg-card/50 rounded-full border border-border shadow-xs backdrop-blur-sm transition-all hover:bg-card hover:shadow-md">
+                                    <div className="flex items-center gap-3">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                            src={user.picture}
+                                            alt={user.name}
+                                            className="w-8 h-8 rounded-full ring-2 ring-background"
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium text-foreground leading-none mb-0.5">
+                                                {user.name}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                                                {user.source === "iap"
+                                                    ? "IAP Verified"
+                                                    : "Google Account"}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {isOAuthAuthenticated && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={logout}
+                                            className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-full ml-1"
+                                        >
+                                            <LogOut className="h-4 w-4" />
+                                        </Button>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="text-muted-foreground text-sm font-medium px-4 py-2 bg-muted/50 rounded-full">
+                                    {isConfigLoading ? "載入中..." : "未登入"}
+                                </div>
+                            )}
+                        </div>
                     </div>
 
-                    {/* 只有 OAuth 登入才顯示登出按鈕 */}
-                    {isOAuthAuthenticated && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={logout}
-                        className="border-green-300 text-green-700 hover:bg-green-100"
-                      >
-                        <LogOut className="h-4 w-4 mr-2" />
-                        登出
-                      </Button>
+                    {/* 分隔線 */}
+                    <div className="h-px bg-gradient-to-r from-border via-border/50 to-transparent" />
+                </div>
+
+                {/* 狀態指示器 */}
+                <div className="space-y-6 mb-12">
+                    {(error || processError) && (
+                        <ErrorIndicator
+                            title="操作失敗"
+                            message={error || processError?.message || "未知錯誤"}
+                            onDismiss={() => {
+                                setError(null);
+                                resetProcess();
+                            }}
+                        />
                     )}
-                  </div>
-                ) : (
-                  <div className="text-gray-500 text-sm">
-                    {isConfigLoading ? '載入中...' : '未登入'}
-                  </div>
-                )}
-              </div>
+
+                    {exportSuccess && (
+                        <SuccessIndicator
+                            title="匯出成功"
+                            message={exportSuccess.message}
+                            action={{
+                                label: "開啟文件",
+                                onClick: () => window.open(exportSuccess.url, "_blank"),
+                                variant: "default",
+                            }}
+                            secondaryAction={{
+                                label: "關閉",
+                                onClick: () => setExportSuccess(null),
+                            }}
+                        />
+                    )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+                    {/* 左側：輸入區域 */}
+                    <div className="space-y-8">
+                        {/* 音頻檔案上傳 - 把這個移到最上面，因為是最重要的第一步 */}
+                        <Card className="border-border shadow-sm bg-card overflow-hidden">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                                    <div className="h-6 w-1 bg-primary rounded-full" />
+                                    步驟 1：上傳錄音
+                                </CardTitle>
+                                <CardDescription>
+                                    支援 mp3, wav, m4a 等常見格式
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-6">
+                                <FileDropzone
+                                    onFileSelect={handleFileSelect}
+                                    onFileRemove={clearSelectedFile}
+                                    isLoading={isProcessingMinutes}
+                                    isUploading={isUploading}
+                                    isGenerating={isGenerating}
+                                    isProcessing={isProcessingMinutes}
+                                    selectedFile={selectedFile}
+                                />
+
+                                {/* 上傳進度條 */}
+                                {isUploading && uploadProgress > 0 && (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-sm text-foreground/80 font-medium">
+                                            <span>上傳中...</span>
+                                            <span>{uploadProgress}%</span>
+                                        </div>
+                                        <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                                            <div
+                                                className="bg-primary h-full rounded-full transition-all duration-300 ease-out"
+                                                style={{ width: `${uploadProgress}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        {/* 會議資訊 */}
+                        <Card className="border-border shadow-sm bg-card overflow-hidden">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                                    <div className="h-6 w-1 bg-primary/40 rounded-full" />
+                                    步驟 2：補充資訊
+                                </CardTitle>
+                                <CardDescription>
+                                    提供更多上下文，幫助 AI 更精確地識別內容
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <Label
+                                            htmlFor="meetingName"
+                                            className="text-sm font-medium text-foreground/80"
+                                        >
+                                            會議名稱
+                                        </Label>
+                                        <Input
+                                            id="meetingName"
+                                            value={meetingName}
+                                            onChange={(e) =>
+                                                setMeetingName(e.target.value)
+                                            }
+                                            placeholder="例如：產品規劃會議"
+                                            className="h-10 bg-background/50 focus:bg-background transition-colors"
+                                            disabled={isProcessingMinutes}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label
+                                            htmlFor="meetingDate"
+                                            className="text-sm font-medium text-foreground/80"
+                                        >
+                                            會議日期
+                                        </Label>
+                                        <Input
+                                            id="meetingDate"
+                                            type="date"
+                                            value={meetingDate}
+                                            onChange={(e) =>
+                                                setMeetingDate(e.target.value)
+                                            }
+                                            className="h-10 bg-background/50 focus:bg-background transition-colors"
+                                            disabled={isProcessingMinutes}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label
+                                        htmlFor="participants"
+                                        className="text-sm font-medium text-foreground/80"
+                                    >
+                                        與會人員
+                                    </Label>
+                                    <Input
+                                        id="participants"
+                                        value={participants}
+                                        onChange={(e) =>
+                                            setParticipants(e.target.value)
+                                        }
+                                        placeholder="例如：Alex, Sarah, Mike"
+                                        className="h-10 bg-background/50 focus:bg-background transition-colors"
+                                        disabled={isProcessingMinutes}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label
+                                        htmlFor="additionalInfo"
+                                        className="text-sm font-medium text-foreground/80"
+                                    >
+                                        其他備註
+                                    </Label>
+                                    <Textarea
+                                        id="additionalInfo"
+                                        value={additionalInfo}
+                                        onChange={(e) =>
+                                            setAdditionalInfo(e.target.value)
+                                        }
+                                        placeholder="例如：本次會議重點在於討論 Q4 營收..."
+                                        rows={3}
+                                        className="resize-none bg-background/50 focus:bg-background transition-colors"
+                                        disabled={isProcessingMinutes}
+                                    />
+                                </div>
+
+                                {/* 確認處理按鈕 - 移到這裡 */}
+                                {selectedFile &&
+                                    !isProcessingMinutes &&
+                                    currentStep === "idle" && (
+                                        <div className="pt-2">
+                                            <Button
+                                                onClick={handleStartProcessing}
+                                                size="lg"
+                                                className="w-full text-base font-semibold shadow-md active:scale-[0.99] transition-all"
+                                            >
+                                                開始生成會議記錄
+                                            </Button>
+                                        </div>
+                                    )}
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* 右側：結果 */}
+                    <div className="flex flex-col h-full">
+                        <Card className="border-border shadow-sm bg-card flex-1 flex flex-col overflow-hidden h-full min-h-[600px]">
+                            <CardHeader className="pb-2 flex-none">
+                                <div className="flex flex-row items-center justify-between">
+                                    <div className="space-y-1">
+                                        <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                                            <div className="h-6 w-1 bg-primary rounded-full" />
+                                            生成結果
+                                        </CardTitle>
+                                    </div>
+
+                                    {meetingRecord && (
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={copyToClipboard}
+                                                disabled={
+                                                    !meetingRecord ||
+                                                    isProcessingMinutes
+                                                }
+                                                className="h-8 px-2 text-muted-foreground hover:text-primary"
+                                            >
+                                                <Copy className="h-4 w-4 mr-1.5" />
+                                                複製
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={clearAll}
+                                                disabled={isProcessingMinutes}
+                                                className="h-8 px-2 text-muted-foreground hover:text-destructive"
+                                            >
+                                                <Trash2 className="h-4 w-4 mr-1.5" />
+                                                清除
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                            </CardHeader>
+
+                            <CardContent className="flex-1 p-0 flex flex-col min-h-0">
+                                {meetingRecord ? (
+                                    <div className="flex flex-col h-full">
+                                        {/* Toolbar */}
+                                        <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-background/50">
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={() =>
+                                                        setIsPreviewMode(false)
+                                                    }
+                                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                                        !isPreviewMode
+                                                            ? "bg-primary/10 text-primary"
+                                                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                    }`}
+                                                >
+                                                    編輯模式
+                                                </button>
+                                                <button
+                                                    onClick={() =>
+                                                        setIsPreviewMode(true)
+                                                    }
+                                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                                        isPreviewMode
+                                                            ? "bg-primary/10 text-primary"
+                                                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                    }`}
+                                                >
+                                                    預覽模式
+                                                </button>
+                                            </div>
+                                            <div className="text-[10px] text-muted-foreground tabular-nums">
+                                                {meetingRecord.length} 字
+                                            </div>
+                                        </div>
+
+                                        {/* Content */}
+                                        <div className="flex-1 overflow-hidden relative group">
+                                            {isPreviewMode ? (
+                                                <div className="absolute inset-0 overflow-y-auto p-6 scroll-smooth">
+                                                    <div className="markdown-body prose prose-sm prose-slate dark:prose-invert max-w-none">
+                                                        <ReactMarkdown
+                                                            remarkPlugins={[remarkGfm]}
+                                                            rehypePlugins={[
+                                                                rehypeHighlight,
+                                                            ]}
+                                                        >
+                                                            {meetingRecord}
+                                                        </ReactMarkdown>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <Textarea
+                                                    value={meetingRecord}
+                                                    onChange={(e) =>
+                                                        setMeetingRecord(e.target.value)
+                                                    }
+                                                    className="absolute inset-0 w-full h-full resize-none border-0 focus:ring-0 rounded-none p-6 font-mono text-sm leading-relaxed bg-transparent"
+                                                    placeholder="會議記錄將出現在這裡..."
+                                                />
+                                            )}
+                                        </div>
+
+                                        {/* Bottom Action */}
+                                        <div className="p-4 border-t border-border/50 bg-background/50 backdrop-blur-sm">
+                                            <Button
+                                                onClick={exportToGoogleDocs}
+                                                disabled={
+                                                    !meetingRecord ||
+                                                    exportMutation.isPending ||
+                                                    isProcessingMinutes
+                                                }
+                                                className="w-full shadow-sm"
+                                                size="lg"
+                                            >
+                                                <FileDown className="h-4 w-4 mr-2" />
+                                                {exportMutation.isPending
+                                                    ? "正在匯出到 Google Docs..."
+                                                    : hasDocsPermission
+                                                      ? "匯出到 Google Docs"
+                                                      : "授權並匯出"}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center p-8 text-center bg-muted/5 space-y-4">
+                                        <div className="w-16 h-16 rounded-full bg-muted/20 flex items-center justify-center">
+                                            <FileDown className="h-8 w-8 text-muted-foreground/50" />
+                                        </div>
+                                        <div className="max-w-xs space-y-1">
+                                            <p className="font-medium text-foreground">
+                                                準備就緒
+                                            </p>
+                                            <p className="text-sm text-muted-foreground">
+                                                請在左側上傳錄音檔案，AI
+                                                將為您生成詳細的會議記錄
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </div>
+                </div>
             </div>
-          </CardHeader>
-        </Card>
-
-        {/* 狀態指示器 */}
-        <div className="space-y-6 mb-12">
-          {(error || processError) && (
-            <ErrorIndicator
-              title="操作失敗"
-              message={error || processError?.message || '未知錯誤'}
-              onDismiss={() => {
-                setError(null)
-                resetProcess()
-              }}
-            />
-          )}
-
-          {exportSuccess && (
-            <SuccessIndicator
-              title="匯出成功"
-              message={exportSuccess.message}
-              action={{
-                label: "開啟文件",
-                onClick: () => window.open(exportSuccess.url, '_blank'),
-                variant: "default"
-              }}
-              secondaryAction={{
-                label: "關閉",
-                onClick: () => setExportSuccess(null)
-              }}
-            />
-          )}
         </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
-          {/* 左側：會議資訊輸入 */}
-          <div className="space-y-8">
-            {/* 會議基本資訊 */}
-            <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm">
-              <CardHeader className="pb-6">
-                <CardTitle className="text-xl font-semibold text-gray-800">會議資訊</CardTitle>
-                <CardDescription className="text-gray-600">
-                  填寫會議基本資訊，幫助 AI 生成更準確的記錄
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="meetingName" className="text-sm font-medium text-gray-700">
-                      會議名稱
-                    </Label>
-                    <Input
-                      id="meetingName"
-                      value={meetingName}
-                      onChange={(e) => setMeetingName(e.target.value)}
-                      placeholder="例如：產品規劃會議"
-                      className="h-11"
-                      disabled={isProcessingMinutes}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="meetingDate" className="text-sm font-medium text-gray-700">
-                      會議日期
-                    </Label>
-                    <Input
-                      id="meetingDate"
-                      type="date"
-                      value={meetingDate}
-                      onChange={(e) => setMeetingDate(e.target.value)}
-                      className="h-11"
-                      disabled={isProcessingMinutes}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="participants" className="text-sm font-medium text-gray-700">
-                    與會人員
-                  </Label>
-                  <Input
-                    id="participants"
-                    value={participants}
-                    onChange={(e) => setParticipants(e.target.value)}
-                    placeholder="例如：張三、李四、王五"
-                    className="h-11"
-                    disabled={isProcessingMinutes}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="additionalInfo" className="text-sm font-medium text-gray-700">
-                    其他資訊
-                  </Label>
-                  <Textarea
-                    id="additionalInfo"
-                    value={additionalInfo}
-                    onChange={(e) => setAdditionalInfo(e.target.value)}
-                    placeholder="例如：會議目標、背景資訊等"
-                    rows={4}
-                    className="resize-none"
-                    disabled={isProcessingMinutes}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* 音頻檔案上傳 */}
-            <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm">
-              <CardHeader className="pb-6">
-                <CardTitle className="text-xl font-semibold text-gray-800">音頻檔案</CardTitle>
-                <CardDescription className="text-gray-600">
-                  上傳會議音頻檔案，AI 將自動轉錄並生成記錄
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <FileDropzone
-                  onFileSelect={handleFileSelect}
-                  onFileRemove={clearSelectedFile}
-                  isLoading={isProcessingMinutes}
-                  isUploading={isUploading}
-                  isGenerating={isGenerating}
-                  isProcessing={isProcessingMinutes}
-                  selectedFile={selectedFile}
-                />
-
-                {/* 上傳進度條 */}
-                {isUploading && uploadProgress > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm text-gray-600">
-                      <span>上傳進度</span>
-                      <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${uploadProgress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* 確認處理按鈕 */}
-                {selectedFile && !isProcessingMinutes && currentStep === 'idle' && (
-                  <div className="flex justify-center pt-4">
-                    <Button
-                      onClick={handleStartProcessing}
-                      size="lg"
-                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-8 py-3 rounded-xl shadow-lg"
-                    >
-                      開始處理音頻檔案
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* 右側：會議記錄顯示與操作 */}
-          <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm">
-            <CardHeader className="pb-6">
-              <div className="space-y-4">
-                <div>
-                  <CardTitle className="text-xl font-semibold text-gray-800">會議記錄</CardTitle>
-                  <CardDescription className="text-gray-600">
-                    AI 生成的會議記錄將顯示在這裡，您可以編輯和匯出
-                  </CardDescription>
-                </div>
-
-                {/* 操作按鈕 */}
-                {meetingRecord && (
-                  <div className="flex flex-wrap gap-3 pt-2 border-t">
-                    <Button
-                      variant="outline"
-                      onClick={copyToClipboard}
-                      disabled={!meetingRecord || isProcessingMinutes}
-                      className="flex items-center gap-2"
-                    >
-                      <Copy className="h-4 w-4" />
-                      {isCopied ? '已複製' : '複製內容'}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      onClick={clearAll}
-                      disabled={isProcessingMinutes}
-                      className="flex items-center gap-2 text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      清除全部
-                    </Button>
-
-                    <Button
-                      onClick={exportToGoogleDocs}
-                      disabled={!meetingRecord || exportMutation.isPending || isProcessingMinutes}
-                      className="flex items-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white"
-                    >
-                      <FileDown className="h-4 w-4" />
-                      {exportMutation.isPending
-                        ? '匯出中...'
-                        : hasDocsPermission
-                          ? '匯出到 Google Docs'
-                          : '授權並匯出'}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardHeader>
-
-            <CardContent>
-              {meetingRecord ? (
-                <div className="space-y-4">
-                  {/* 編輯/預覽模式切換 */}
-                  <div className="flex gap-2 border-b">
-                    <button
-                      onClick={() => setIsPreviewMode(false)}
-                      className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        !isPreviewMode
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
-                      disabled={isProcessingMinutes}
-                    >
-                      <Edit className="h-4 w-4" />
-                      編輯
-                    </button>
-                    <button
-                      onClick={() => setIsPreviewMode(true)}
-                      className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                        isPreviewMode
-                          ? 'border-blue-500 text-blue-600'
-                          : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
-                      disabled={isProcessingMinutes}
-                    >
-                      <Eye className="h-4 w-4" />
-                      預覽
-                    </button>
-                  </div>
-
-                  {/* 內容區域 */}
-                  {isPreviewMode ? (
-                    <div className="h-[600px] overflow-y-auto p-6 border border-gray-200 rounded-lg bg-white">
-                      <div className="markdown-body">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeHighlight]}
-                        >
-                          {meetingRecord}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  ) : (
-                    <Textarea
-                      value={meetingRecord}
-                      onChange={(e) => setMeetingRecord(e.target.value)}
-                      className="h-[600px] font-mono text-sm leading-relaxed resize-none border-gray-200 focus:border-blue-500 focus:ring-blue-500 overflow-y-auto"
-                      placeholder="會議記錄將出現在這裡..."
-                      disabled={isProcessingMinutes}
-                    />
-                  )}
-
-                  <div className="text-xs text-gray-500 text-right">
-                    字數：{meetingRecord.length} | 行數：{meetingRecord.split('\n').length}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-20 text-gray-500">
-                  <div className="max-w-sm mx-auto space-y-4">
-                    <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center">
-                      <FileDown className="h-8 w-8 text-gray-400" />
-                    </div>
-                    <div>
-                      <p className="text-lg font-medium text-gray-700 mb-2">
-                        尚無會議記錄
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        請上傳音頻檔案，AI 將自動生成會議記錄
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  )
+    );
 }

@@ -12,17 +12,21 @@ export interface OAuthConfig {
  * 根據環境自動選擇從 Secret Manager 或環境變數讀取
  */
 export async function getOAuthConfig(): Promise<OAuthConfig> {
-  // 判斷是否在生產環境
-  const isProduction = process.env.GOOGLE_CLOUD_PROJECT && 
-                       process.env.NODE_ENV === 'production' ||
-                       process.env.DEPLOYMENT_ENV === 'production';
-  
+  // 判斷是否使用 Secret Manager
+  // 1. 明確設定 USE_SECRET_MANAGER=true 時強制使用
+  // 2. 生產環境自動使用
+  const useSecretManager = process.env.USE_SECRET_MANAGER === 'true' ||
+                           (process.env.GOOGLE_CLOUD_PROJECT &&
+                            (process.env.NODE_ENV === 'production' ||
+                             process.env.DEPLOYMENT_ENV === 'production'));
+
   let clientId: string;
   let clientSecret: string;
   let baseUrl: string;
-  
-  if (isProduction) {
-    // 生產環境：從 Secret Manager 讀取
+
+  if (useSecretManager) {
+    // 從 Secret Manager 讀取
+    console.log('使用 Secret Manager 讀取 OAuth 設定');
     try {
       clientId = await getSecret('google-oauth-client-id');
       clientSecret = await getSecret('google-oauth-client-secret');
@@ -32,21 +36,13 @@ export async function getOAuthConfig(): Promise<OAuthConfig> {
       throw new Error('無法讀取 OAuth 設定');
     }
   } else {
-    // 開發環境：從環境變數讀取
+    // 從環境變數讀取
+    console.log('使用環境變數讀取 OAuth 設定');
     clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
     clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
     baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   }
-  
-  // 如果是生產環境但沒有從 Secret Manager 取得 clientId，嘗試從 Secret Manager 讀取
-  if (isProduction && !clientId) {
-    try {
-      clientId = await getSecret('google-oauth-client-id');
-    } catch (error) {
-      console.error('無法從 Secret Manager 讀取 Client ID:', error);
-    }
-  }
-  
+
   if (!clientId || !clientSecret) {
     throw new Error('Google OAuth 設定不完整');
   }

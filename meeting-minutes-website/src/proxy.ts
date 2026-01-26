@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 /**
  * Next.js Middleware - 處理 CSRF 保護和安全 headers
  */
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const response = NextResponse.next();
 
   // 安全 Headers

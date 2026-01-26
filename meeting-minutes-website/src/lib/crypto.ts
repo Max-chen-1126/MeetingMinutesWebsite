@@ -6,15 +6,19 @@ import { getSecret } from './secrets';
  * 取得加密金鑰
  */
 async function getEncryptionKey(): Promise<Buffer> {
-  // 判斷是否在生產環境
-  const isProduction = (process.env.NODE_ENV === 'production' ||
-                       process.env.DEPLOYMENT_ENV === 'production') &&
-                       !!process.env.GOOGLE_CLOUD_PROJECT;
-  
+  // 判斷是否使用 Secret Manager
+  // 1. 明確設定 USE_SECRET_MANAGER=true 時強制使用
+  // 2. 生產環境自動使用
+  const useSecretManager = process.env.USE_SECRET_MANAGER === 'true' ||
+                           ((process.env.NODE_ENV === 'production' ||
+                             process.env.DEPLOYMENT_ENV === 'production') &&
+                            !!process.env.GOOGLE_CLOUD_PROJECT);
+
   let encryptionKey: string;
-  
-  if (isProduction) {
-    // 生產環境：從 Secret Manager 讀取
+
+  if (useSecretManager) {
+    // 從 Secret Manager 讀取
+    console.log('使用 Secret Manager 讀取加密金鑰');
     try {
       encryptionKey = await getSecret('token-encryption-key');
     } catch (error) {
@@ -22,7 +26,8 @@ async function getEncryptionKey(): Promise<Buffer> {
       throw new Error('無法讀取加密設定');
     }
   } else {
-    // 開發環境：從環境變數讀取，如果沒有則使用預設值（僅開發用）
+    // 從環境變數讀取，如果沒有則使用預設值（僅開發用）
+    console.log('使用環境變數讀取加密金鑰');
     encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || 'dev-key-32-chars-long-for-aes256!!';
   }
   

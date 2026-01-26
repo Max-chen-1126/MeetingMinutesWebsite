@@ -153,30 +153,40 @@ export async function POST(req: NextRequest) {
             請直接開始輸出 Markdown 格式的會議記錄，不要包含任何前言或結語。`;
 
         const requestPayload = {
-            contents: [{
-                role: "user",
-                parts: [
-                    {
-                        fileData: {
-                            mimeType: contentType,
-                            fileUri: receivedGcsPath // Line 83 - Uses the full path string
-                        }
-                    },
-                    {
-                        text: textPrompt
-                    }
-                ]
-            }],
+            contents: [
+                {
+                    role: "user",
+                    parts: [
+                        {
+                            fileData: {
+                                mimeType: contentType,
+                                fileUri: receivedGcsPath, // Line 83 - Uses the full path string
+                            },
+                        },
+                        {
+                            text: textPrompt,
+                        },
+                    ],
+                },
+            ],
             generationConfig: {
-                "temperature": 0.1,
-                // Increased maxOutputTokens - adjust based on Gemini model limits & needs
-                "maxOutputTokens": 8192, // Was 50000, 8192 is common for many models
-            }
+                temperature: 1.0, // Gemini 3 recommends default 1.0 for optimal reasoning
+                maxOutputTokens: 8192,
+            },
+            thinkingConfig: {
+                thinkingLevel: "low", // Start with low for testing; can upgrade to "high" later
+            },
         };
 
         // --- Step 4: Call Gemini REST API ---
-        const modelId = "gemini-2.5-pro"; // Adjust if using a different model
-        const apiUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+        const modelId = "gemini-3-pro-preview"; // Migrated to Gemini 3
+
+        const apiEndpoint =
+            location === "global"
+                ? "aiplatform.googleapis.com"
+                : `${location}-aiplatform.googleapis.com`;
+
+        const apiUrl = `https://${apiEndpoint}/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
 
         console.log(`Calling Gemini REST API: ${apiUrl}`);
         const apiResponse = await fetch(apiUrl, {
@@ -212,12 +222,27 @@ export async function POST(req: NextRequest) {
 
         const firstCandidate = candidates[0];
         const parts = firstCandidate?.content?.parts;
-        if (!parts || !Array.isArray(parts) || parts.length === 0 || !parts[0].text) {
-            console.error("Invalid response structure - parts or text missing:", responseJson);
-            throw new Error("Failed to parse response from Gemini API: Text content missing.");
+        if (!parts || !Array.isArray(parts) || parts.length === 0) {
+            console.error("Invalid response structure - parts missing:", responseJson);
+            throw new Error("Failed to parse response from Gemini API: Parts missing.");
         }
 
-        const generatedText = parts[0].text;
+        // Gemini 3 with thinkingConfig may return thought parts and text parts
+        // Find the text part (not a thought part)
+        const textPart =
+            parts.find(
+                (part: { text?: string; thought?: boolean }) =>
+                    part.text !== undefined && !part.thought,
+            ) || parts.find((part: { text?: string }) => part.text !== undefined);
+
+        if (!textPart?.text) {
+            console.error("Invalid response structure - text missing:", responseJson);
+            throw new Error(
+                "Failed to parse response from Gemini API: Text content missing.",
+            );
+        }
+
+        const generatedText = textPart.text;
         console.log("Content generated successfully via REST API.");
 
         return NextResponse.json({ meetingMinutes: generatedText ?? '' });
