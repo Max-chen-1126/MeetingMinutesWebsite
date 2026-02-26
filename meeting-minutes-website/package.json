@@ -9,7 +9,7 @@
         "lint": "next lint"
     },
     "dependencies": {
-        "@google-cloud/secret-manager": "^6.0.1",
+        "@google-cloud/secret-manager": "^6.1.1",
         "@google-cloud/storage": "^7.16.0",
         "@google/genai": "^0.8.0",
         "@hookform/resolvers": "^5.0.1",

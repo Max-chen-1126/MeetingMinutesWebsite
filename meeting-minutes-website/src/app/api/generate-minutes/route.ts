@@ -54,31 +54,32 @@ export async function POST(req: NextRequest) {
     try {
         // --- Step 1: Get Request Body (JSON) ---
         const body = await req.json();
-        const fileName = typeof body.fileName === 'string' ? body.fileName : null;
-        const contentType = typeof body.contentType === 'string' ? body.contentType : 'audio/mpeg';
-        const meetingName = body.meetingName || '未提供';
-        const meetingDate = body.meetingDate || '未提供';
-        const participants = body.participants || '未提供';
-        const additionalInfo = body.additionalInfo || '無';
+        const fileName = typeof body.fileName === "string" ? body.fileName : null;
+        const contentType =
+            typeof body.contentType === "string" ? body.contentType : "audio/mpeg";
+        const meetingName = body.meetingName || "未提供";
+        const meetingDate = body.meetingDate || "未提供";
+        const participants = body.participants || "未提供";
+        const additionalInfo = body.additionalInfo || "無";
 
         // --- Input Validation ---
         if (!fileName) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Missing required parameter: fileName';
+            errorMessage = "Missing required parameter: fileName";
             throw new Error(errorMessage);
         }
-        
+
         // Build GCS path from fileName
         const bucketName = process.env.GCS_BUCKET_NAME;
         if (!bucketName) {
-            errorMessage = 'Server configuration error: GCS_BUCKET_NAME not set';
+            errorMessage = "Server configuration error: GCS_BUCKET_NAME not set";
             throw new Error(errorMessage);
         }
         receivedGcsPath = `gs://${bucketName}/uploads/${fileName}`;
         const parsedPath = parseGcsPath(receivedGcsPath);
         if (!parsedPath) {
             // Removed unused 'errorOccurred = true;'
-            errorMessage = 'Failed to parse GCS path from fileName';
+            errorMessage = "Failed to parse GCS path from fileName";
             throw new Error(errorMessage);
         }
         // NOTE: The ESLint error about unused 'filePath' might be specific to a scope
@@ -87,7 +88,6 @@ export async function POST(req: NextRequest) {
         // you might need to add:
         // // eslint-disable-next-line @typescript-eslint/no-unused-vars
         // above the line where ESLint reports the error, but first try without it.
-
 
         // --- Step 2: Get Access Token ---
         console.log("Getting access token...");
@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
         };
 
         // --- Step 4: Call Gemini REST API ---
-        const modelId = "gemini-3-pro-preview"; // Migrated to Gemini 3
+        const modelId = "gemini-3.1-pro-preview"; // Migrated to Gemini 3.1
 
         const apiEndpoint =
             location === "global"
@@ -187,10 +187,10 @@ export async function POST(req: NextRequest) {
 
         console.log(`Calling Gemini REST API: ${apiUrl}`);
         const apiResponse = await fetch(apiUrl, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json; charset=utf-8',
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json; charset=utf-8",
             },
             body: JSON.stringify(requestPayload),
         });
@@ -203,8 +203,10 @@ export async function POST(req: NextRequest) {
             try {
                 const errorJson = JSON.parse(errorBody);
                 apiErrorMsg = errorJson.error?.message || apiErrorMsg;
-            // Fixed: Removed unused 'parseErr' variable from catch signature
-            } catch { /* Ignore if not JSON */ }
+                // Fixed: Removed unused 'parseErr' variable from catch signature
+            } catch {
+                /* Ignore if not JSON */
+            }
             throw new Error(apiErrorMsg);
         }
 
@@ -214,7 +216,9 @@ export async function POST(req: NextRequest) {
         const candidates = responseJson.candidates;
         if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
             console.error("Invalid response structure from Gemini API:", responseJson);
-            throw new Error("Failed to parse response from Gemini API: No candidates found.");
+            throw new Error(
+                "Failed to parse response from Gemini API: No candidates found.",
+            );
         }
 
         const firstCandidate = candidates[0];
@@ -242,8 +246,7 @@ export async function POST(req: NextRequest) {
         const generatedText = textPart.text;
         console.log("Content generated successfully via REST API.");
 
-        return NextResponse.json({ meetingMinutes: generatedText ?? '' });
-
+        return NextResponse.json({ meetingMinutes: generatedText ?? "" });
     } catch (error: unknown) {
         // Removed unused 'errorOccurred = true;'
         if (error instanceof Error) {
